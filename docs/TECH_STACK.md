@@ -7,7 +7,7 @@
 | Desktop framework | Tauri | v2 | Rust backend + React frontend, native packaging |
 | Backend language | Rust | stable | Performance, safety, librtlsdr FFI |
 | Frontend language | TypeScript | 5.x | Type safety for IPC contracts |
-| Frontend framework | React | 18 | Component model, hooks, canvas integration |
+| Frontend framework | React | 19 | Component model, hooks, canvas integration |
 | State management | Zustand | 4.x | Minimal, no boilerplate |
 | FFT | rustfft | 6.x | Proven, fast, pure Rust |
 | RTL-SDR binding | rtlsdr-rs + raw FFI | latest | Direct hardware access |
@@ -66,13 +66,13 @@ librtlsdr. Document the decision in a comment in `hardware/mod.rs`.
 {
   "dependencies": {
     "@tauri-apps/api": "^2",
-    "react": "^18",
-    "react-dom": "^18",
+    "react": "^19",
+    "react-dom": "^19",
     "zustand": "^4"
   },
   "devDependencies": {
-    "@types/react": "^18",
-    "@types/react-dom": "^18",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
     "typescript": "^5",
     "vite": "^5",
     "@vitejs/plugin-react": "^4",

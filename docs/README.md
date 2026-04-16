@@ -15,6 +15,8 @@
 | `HARDWARE.md` | RTL-SDR specifics, librtlsdr, sampling rates, gain, tuning | Active |
 | `SIGNALS.md` | Signal types, SigMF format, capture schema, frequency domains | Active |
 | `CONVENTIONS.md` | Code style, naming, error handling, file structure | Active |
+| `TECH_STACK.md` | Approved technologies, versions, dependencies, tooling choices | Active |
+| `PRD.md` | Product requirements, scope, UX goals, acceptance criteria | Active |
 | `TIMELINE.md` | Development phases, milestones, task ordering | Active |
 
 ---
@@ -40,6 +42,8 @@ Every time a file in `/docs/` is created or modified:
 - **"How does Rust talk to React?"** → `ARCHITECTURE.md`
 - **"What is SigMF format?"** → `SIGNALS.md`
 - **"How should I name this function?"** → `CONVENTIONS.md`
+- **"What tech and versions are approved?"** → `TECH_STACK.md`
+- **"What are the product goals and acceptance criteria?"** → `PRD.md`
 - **"What should I build next?"** → `TIMELINE.md`
 - **"What FFT size should I use?"** → `DSP.md`
 - **"How do I handle RTL-SDR errors?"** → `HARDWARE.md`

@@ -1,0 +1,24 @@
+[package]
+name = "rail"
+version = "0.1.0"
+description = "RAIL — Radio Analysis and Intel Lab (Tauri v2 desktop app)"
+authors = ["RAIL"]
+edition = "2021"
+
+[lib]
+name = "rail_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+log = "0.4"
+env_logger = "0.11"
+thiserror = "1"
+rustfft = "6"
+nusb = "0.1"
