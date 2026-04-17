@@ -5,6 +5,10 @@ import {
   type DeviceInfo,
   type RailError,
 } from "./ipc/commands";
+import FrequencyControl from "./components/FrequencyControl";
+import GainControl from "./components/GainControl";
+import Waterfall from "./components/Waterfall";
+import { useRadioStore } from "./store/radio";
 import "./App.css";
 
 type DeviceState =
@@ -25,6 +29,8 @@ const isRailError = (value: unknown): value is RailError => {
 function App() {
   const [pingResult, setPingResult] = useState<string>("…");
   const [device, setDevice] = useState<DeviceState>({ status: "idle" });
+  const frequencyHz = useRadioStore((s) => s.frequencyHz);
+  const streamEnabled = device.status === "found";
 
   useEffect(() => {
     let cancelled = false;
@@ -74,24 +80,31 @@ function App() {
   }, []);
 
   return (
-    <main className="container">
-      <h1>RAIL — Radio Analysis and Intel Lab</h1>
-      <section className="status">
-        <p>
-          IPC bridge: <code>{pingResult}</code>
-        </p>
-        <p>
-          RTL-SDR:{" "}
-          {device.status === "idle" && <code>idle</code>}
-          {device.status === "checking" && <code>checking…</code>}
-          {device.status === "found" && (
-            <code>
-              {device.device.name} (index {device.device.index})
-            </code>
-          )}
-          {device.status === "missing" && <code>{device.message}</code>}
-        </p>
+    <main className="app">
+      <header className="app-header">
+        <h1>RAIL</h1>
+        <div className="app-status">
+          <span>
+            IPC <code>{pingResult}</code>
+          </span>
+          <span>
+            RTL-SDR{" "}
+            {device.status === "idle" && <code>idle</code>}
+            {device.status === "checking" && <code>checking…</code>}
+            {device.status === "found" && (
+              <code>
+                {device.device.name} (#{device.device.index})
+              </code>
+            )}
+            {device.status === "missing" && <code>{device.message}</code>}
+          </span>
+        </div>
+      </header>
+      <section className="app-controls">
+        <FrequencyControl />
+        <GainControl />
       </section>
+      <Waterfall frequencyHz={frequencyHz} enabled={streamEnabled} />
     </main>
   );
 }

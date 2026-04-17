@@ -22,3 +22,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Rust / Tauri build outputs
+target/
+src-tauri/target/
+
+# Vendored native prebuilts (see vendor/librtlsdr-win-x64/README.md)
+vendor/librtlsdr-win-x64/*.dll
+vendor/librtlsdr-win-x64/*.lib
+vendor/librtlsdr-win-x64/*.exp

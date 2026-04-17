@@ -13,11 +13,8 @@ pub mod ipc;
 pub fn run() {
     let _ = env_logger::try_init();
 
-    tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![
-            ipc::commands::ping,
-            ipc::commands::check_device,
-        ])
+    let builder = ipc::commands::register(tauri::Builder::default());
+    builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

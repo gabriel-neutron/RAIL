@@ -56,7 +56,8 @@ RAIL (Radio Analysis and Intel Lab) is a Tauri desktop application.
 | Purpose | Library | Notes |
 |---|---|---|
 | FFT | `rustfft` | Do not reimplement FFT |
-| RTL-SDR | `rtlsdr-rs` or raw FFI | Direct binding, no rtl_tcp daemon |
+| RTL-SDR control | `rtlsdr-rs` or raw FFI via `libloading` | Phase 1+. Direct binding, no rtl_tcp daemon |
+| USB enumeration | `nusb` | Phase 0 device detection (pure Rust, no FFI) |
 | Serialization | `serde` + `serde_json` | Standard |
 | IPC binary | Tauri binary events | float32 ArrayBuffer |
 | Frontend state | `zustand` | No Redux |
