@@ -10,17 +10,17 @@
 
 **Goal**: verified, buildable empty project. Nothing ships until this is green.
 
-- [ ] Tauri v2 project initialized (`create-tauri-app`)
-- [ ] Rust toolchain verified (`cargo build` passes)
-- [ ] React + TypeScript frontend initialized
-- [ ] `rtlsdr-rs` or raw FFI dependency added and compiled
-- [ ] RTL-SDR device detected and opened in Rust (log device info)
-- [ ] librtlsdr installed and linked on host platform
-- [ ] Basic Tauri command (`ping` → `pong`) working end-to-end
-- [ ] `rustfft` dependency added
-- [ ] `zustand` added to frontend
-- [ ] `/docs/` folder structure in place
-- [ ] `CLAUDE.md` and all docs committed
+- [x] Tauri v2 project initialized (`create-tauri-app`)
+- [x] Rust toolchain verified (`cargo build` passes)
+- [x] React + TypeScript frontend initialized
+- [x] `rtlsdr-rs` or raw FFI dependency added and compiled
+- [x] RTL-SDR device detected and opened in Rust (log device info)
+- [x] librtlsdr installed and linked on host platform
+- [x] Basic Tauri command (`ping` → `pong`) working end-to-end
+- [x] `rustfft` dependency added
+- [x] `zustand` added to frontend
+- [x] `/docs/` folder structure in place
+- [x] `CLAUDE.md` and all docs committed
 
 **Exit criterion**: `cargo tauri dev` launches, RTL-SDR is detected, ping command works.
 
@@ -30,15 +30,15 @@
 
 **Goal**: live waterfall visible in the UI from real hardware.
 
-- [ ] RTL-SDR async stream running in Rust (raw IQ bytes flowing)
-- [ ] IQ conversion: u8 → f32 complex (see HARDWARE.md §1)
-- [ ] FFT pipeline: Hann window → rustfft → magnitude → dB → FFT shift (see DSP.md §2–3)
-- [ ] Binary Tauri event emitting float32 waterfall frames
-- [ ] React canvas component receiving float32 ArrayBuffer
-- [ ] Colormap applied (dB → RGB, 6-stop gradient)
-- [ ] Waterfall scrolls downward at ~25 fps
-- [ ] Frequency display showing current center frequency
-- [ ] Gain control (auto/manual) wired to hardware
+- [x] RTL-SDR async stream running in Rust (raw IQ bytes flowing)
+- [x] IQ conversion: u8 → f32 complex (see HARDWARE.md §1)
+- [x] FFT pipeline: Hann window → rustfft → magnitude → dB → FFT shift (see DSP.md §2–3)
+- [x] Binary Tauri event emitting float32 waterfall frames
+- [x] React canvas component receiving float32 ArrayBuffer
+- [x] Colormap applied (dB → RGB, 6-stop gradient)
+- [x] Waterfall scrolls downward at ~25 fps
+- [x] Frequency display showing current center frequency
+- [x] Gain control (auto/manual) wired to hardware
 
 **Exit criterion**: open app, see live waterfall scrolling with real spectrum data.
 
@@ -48,13 +48,13 @@
 
 **Goal**: user can tune to any frequency and see the waterfall update.
 
-- [ ] Frequency input box (numeric, Hz/kHz/MHz toggle)
-- [ ] Step buttons (1 Hz, 1 kHz, 10 kHz, 100 kHz steps)
-- [ ] Click-to-tune on waterfall canvas (map pixel X → frequency offset)
-- [ ] Keyboard shortcuts (arrow keys for step tuning)
-- [ ] Bookmark system (save/load named frequencies)
-- [ ] DC offset handling (center freq offset — see DSP.md §1)
-- [ ] PPM correction setting exposed in UI
+- [x] Frequency input box (numeric, Hz/kHz/MHz toggle)
+- [x] Step buttons (1 Hz, 1 kHz, 10 kHz, 100 kHz steps)
+- [x] Click-to-tune on waterfall canvas (map pixel X → frequency offset)
+- [x] Keyboard shortcuts (arrow keys for step tuning)
+- [x] Bookmark system (save/load named frequencies)
+- [x] DC offset handling (center freq offset — see DSP.md §1)
+- [x] PPM correction setting exposed in UI
 
 **Exit criterion**: click on a signal in the waterfall, frequency updates, waterfall recenters.
 

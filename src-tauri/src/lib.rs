@@ -3,6 +3,7 @@
 //! Wires up module namespaces and registers Tauri commands.
 //! See `docs/ARCHITECTURE.md` for module boundaries and IPC contract.
 
+pub mod bookmarks;
 pub mod capture;
 pub mod dsp;
 pub mod error;

@@ -8,7 +8,7 @@
 
 use std::ffi::c_void;
 use std::panic::{self, AssertUnwindSafe};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
@@ -81,8 +81,14 @@ extern "C" fn on_iq(buf: *mut u8, len: u32, ctx: *mut c_void) {
 /// Thread-safe wrapper around the raw device pointer, exposed only so
 /// other threads can call `rtlsdr_cancel_async` (documented thread-safe
 /// in librtlsdr). The device itself is owned by the reader thread.
+///
+/// The `requested` flag distinguishes a deliberate shutdown from an
+/// unexpected exit (e.g. the dongle was physically unplugged). The
+/// reader thread uses it to decide whether to close the handle — on
+/// Windows WinUSB, `rtlsdr_close` on a disconnected device segfaults.
 struct Canceler {
     ptr: *mut ffi::RtlSdrDev,
+    requested: AtomicBool,
 }
 
 // SAFETY: `rtlsdr_cancel_async` is the only call we make through this
@@ -92,13 +98,24 @@ unsafe impl Sync for Canceler {}
 
 impl Canceler {
     fn cancel(&self) {
+        self.requested.store(true, Ordering::SeqCst);
         // SAFETY: ptr is valid until the reader thread's `read_async`
         // returns; we only call this before joining the thread.
         unsafe {
             let _ = ffi::rtlsdr_cancel_async(self.ptr);
         }
     }
+
+    fn was_requested(&self) -> bool {
+        self.requested.load(Ordering::SeqCst)
+    }
 }
+
+/// Callback invoked from the reader thread when `rtlsdr_read_async`
+/// exits without a matching `cancel()` — i.e. the device disappeared
+/// (unplugged, driver restart, bus reset). Runs on the reader thread;
+/// must not block.
+pub type OnDisconnect = Box<dyn FnOnce(String) + Send + 'static>;
 
 /// Public, clonable handle that other tasks can use to request the
 /// reader thread to stop (e.g. the DSP task when its frontend channel
@@ -122,18 +139,23 @@ impl IqStream {
     /// Spawn the reader thread for an already-configured device.
     ///
     /// The device is moved into the worker thread and closed when the
-    /// thread exits. `tx` is the producer side of the IQ channel consumed
-    /// by the DSP task.
+    /// thread exits cleanly. `tx` is the producer side of the IQ channel
+    /// consumed by the DSP task. `on_disconnect` fires on the reader
+    /// thread if `read_async` returns without a matching [`Self::stop`]
+    /// — the caller uses it to notify the frontend.
     pub fn start(
         device: RtlSdrDevice,
         tx: mpsc::Sender<Vec<u8>>,
         buf_num: u32,
         buf_len: u32,
+        on_disconnect: OnDisconnect,
     ) -> Result<Self, RailError> {
         device.reset_buffer()?;
         let canceler = Arc::new(Canceler {
             ptr: device.as_ptr(),
+            requested: AtomicBool::new(false),
         });
+        let canceler_for_thread = canceler.clone();
 
         let thread = thread::Builder::new()
             .name("rail-iq-reader".into())
@@ -148,8 +170,33 @@ impl IqStream {
                 // `read_async` returns, so any callback invocation sees a
                 // valid context. `on_iq` is `extern "C"` and panic-safe.
                 let rc = unsafe { device.read_async(on_iq, ctx_ptr, buf_num, buf_len) };
-                // Device drops here → `rtlsdr_close` fires on exit.
-                drop(device);
+
+                // `read_async` returning without us having asked for it
+                // means librtlsdr bailed out internally — on Windows this
+                // is nearly always a USB disconnect (see the
+                // `cb transfer status: 4/5, canceling...` pattern). The
+                // `rc` itself is unreliable as a disconnect signal because
+                // librtlsdr can return 0 even after every transfer failed;
+                // `was_requested` is the ground truth.
+                if canceler_for_thread.was_requested() {
+                    drop(device);
+                } else {
+                    let msg = match &rc {
+                        Ok(()) => "device stream stopped unexpectedly".to_string(),
+                        Err(e) => e.to_string(),
+                    };
+                    log::warn!(
+                        "rtlsdr_read_async exited unexpectedly ({msg}); \
+                         leaking handle to avoid rtlsdr_close segfault on \
+                         disconnected WinUSB device"
+                    );
+                    // Closing a disconnected WinUSB handle segfaults
+                    // librtlsdr on Windows. The allocation is tiny and
+                    // only lives until process exit — a worthwhile trade.
+                    std::mem::forget(device);
+                    on_disconnect(msg);
+                }
+
                 rc
             })
             .map_err(|e| RailError::StreamError(format!("spawn stream thread: {e}")))?;

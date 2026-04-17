@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 
 import { useWaterfall } from "../../hooks/useWaterfall";
+import { useRadioStore } from "../../store/radio";
 import { buildColormapLut } from "./colormap";
 
 const DEFAULT_FFT_SIZE = 2048;
@@ -9,17 +10,15 @@ const DB_FLOOR = -100;
 const DB_PEAK = -20;
 
 type WaterfallProps = {
-  frequencyHz: number;
   enabled?: boolean;
 };
 
-export const Waterfall = ({ frequencyHz, enabled = true }: WaterfallProps) => {
+export const Waterfall = ({ enabled = true }: WaterfallProps) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rowImageRef = useRef<ImageData | null>(null);
   const lut = useMemo(() => buildColormapLut(256), []);
 
   const { session, error } = useWaterfall({
-    frequencyHz,
     enabled,
     onFrame: (frame) => {
       const canvas = canvasRef.current;
@@ -83,6 +82,21 @@ export const Waterfall = ({ frequencyHz, enabled = true }: WaterfallProps) => {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }, [session?.fftSize]);
 
+  // Pixel X → frequency mapping: DC lands at bin N/2 after `fft_shift`
+  // (docs/DSP.md §1–3; verified by `dc_input_peaks_at_center_after_shift`).
+  // So pixel X over the canvas span maps linearly to [-fs/2, +fs/2].
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const store = useRadioStore.getState();
+    if (!store.streaming) return;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const xNorm = (e.clientX - rect.left) / rect.width;
+    const offsetHz = (xNorm - 0.5) * store.sampleRateHz;
+    store.setFrequency(store.frequencyHz + offsetHz);
+  };
+
   return (
     <section className="waterfall">
       <div className="waterfall-status">
@@ -101,6 +115,7 @@ export const Waterfall = ({ frequencyHz, enabled = true }: WaterfallProps) => {
         className="waterfall-canvas"
         width={DEFAULT_FFT_SIZE}
         height={DISPLAY_HEIGHT}
+        onClick={handleCanvasClick}
       />
     </section>
   );

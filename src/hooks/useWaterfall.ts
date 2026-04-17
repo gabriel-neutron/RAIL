@@ -1,6 +1,11 @@
-// Phase 1 waterfall lifecycle hook: opens a binary `Channel<ArrayBuffer>`,
-// asks Rust to start streaming, drives a rAF drain of the latest frame into
-// the supplied callback, and tears everything down on unmount.
+// Waterfall lifecycle hook: opens a binary `Channel<ArrayBuffer>`, asks
+// Rust to start streaming at the store's current frequency, drives a rAF
+// drain of the latest frame into the supplied callback, and tears
+// everything down on unmount.
+//
+// Frequency changes after startup go through the store's debounced
+// `retune` path (`store/radio.ts`), not through a restart. The effect
+// deps here are `[enabled]` only — tuning never tears the stream down.
 //
 // See docs/ARCHITECTURE.md §3 and docs/DSP.md §3.
 
@@ -18,7 +23,6 @@ import { useRadioStore } from "../store/radio";
 export type WaterfallSession = StartStreamReply;
 
 export type UseWaterfallOptions = {
-  frequencyHz: number;
   enabled?: boolean;
   onFrame: (frame: Float32Array) => void;
 };
@@ -45,7 +49,6 @@ const formatError = (err: unknown): string => {
 };
 
 export const useWaterfall = ({
-  frequencyHz,
   enabled = true,
   onFrame,
 }: UseWaterfallOptions): UseWaterfallState => {
@@ -82,15 +85,16 @@ export const useWaterfall = ({
     };
 
     const store = useRadioStore.getState();
+    const initialFrequencyHz = store.frequencyHz;
 
     (async () => {
       // Drain any previous session before starting a new one. Guards
-      // against rapid enabled/frequency toggles beating the backend's
-      // "stream already running" check.
+      // against rapid enable toggles beating the backend's "stream
+      // already running" check.
       await stopStream().catch(() => undefined);
       if (cancelled) return;
       try {
-        const reply = await startStream({ frequencyHz }, channel);
+        const reply = await startStream({ frequencyHz: initialFrequencyHz }, channel);
         if (cancelled) {
           await stopStream().catch(() => undefined);
           return;
@@ -98,6 +102,7 @@ export const useWaterfall = ({
         setSession(reply);
         setError(null);
         store.setAvailableGains(reply.availableGainsTenthsDb);
+        store.setSampleRate(reply.sampleRateHz);
         store.setStreaming(true);
         rafId = window.requestAnimationFrame(drain);
       } catch (err) {
@@ -120,7 +125,7 @@ export const useWaterfall = ({
       setSession(null);
       useRadioStore.getState().setStreaming(false);
     };
-  }, [enabled, frequencyHz]);
+  }, [enabled]);
 
   return { session, error };
 };

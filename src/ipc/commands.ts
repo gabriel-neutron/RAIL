@@ -53,3 +53,37 @@ export const setGain = (args: SetGainArgs): Promise<void> =>
 
 export const availableGains = (): Promise<number[]> =>
   invoke<number[]>("available_gains");
+
+export type RetuneReply = {
+  frequencyHz: number;
+};
+
+export const retune = (frequencyHz: number): Promise<RetuneReply> =>
+  invoke<RetuneReply>("retune", { args: { frequencyHz } });
+
+export const setPpm = (ppm: number): Promise<void> =>
+  invoke<void>("set_ppm", { args: { ppm } });
+
+export type Bookmark = {
+  id: string;
+  name: string;
+  frequencyHz: number;
+  createdAt: number;
+};
+
+export const listBookmarks = (): Promise<Bookmark[]> =>
+  invoke<Bookmark[]>("list_bookmarks");
+
+export const addBookmark = (
+  name: string,
+  frequencyHz: number,
+): Promise<Bookmark> =>
+  invoke<Bookmark>("add_bookmark", { args: { name, frequencyHz } });
+
+export const removeBookmark = (id: string): Promise<void> =>
+  invoke<void>("remove_bookmark", { args: { id } });
+
+export const replaceBookmarks = (
+  bookmarks: Bookmark[],
+): Promise<Bookmark[]> =>
+  invoke<Bookmark[]>("replace_bookmarks", { args: { bookmarks } });

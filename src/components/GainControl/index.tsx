@@ -50,8 +50,8 @@ export const GainControl = () => {
   const currentIdx = Math.max(0, gains.indexOf(gainTenths));
 
   return (
-    <section className="gain-control">
-      <label className="gain-control-row">
+    <div className="gain-control">
+      <label className="gain-control-auto">
         <input
           type="checkbox"
           checked={auto}
@@ -62,24 +62,28 @@ export const GainControl = () => {
         />
         <span>Auto gain</span>
       </label>
-      <div className="gain-control-row">
-        <input
-          type="range"
-          min={0}
-          max={Math.max(0, gains.length - 1)}
-          step={1}
-          value={currentIdx}
-          disabled={disabled || auto || gains.length === 0}
-          onChange={(e) => {
-            void handleSliderChange(Number(e.target.value));
-          }}
-        />
-        <span className="gain-control-value">
-          {gains.length > 0 ? formatDb(gains[currentIdx]) : "— dB"}
-        </span>
-      </div>
+      {!auto && (
+        <>
+          <span className="gain-control-slider-label">Gain</span>
+          <input
+            type="range"
+            className="gain-control-slider"
+            min={0}
+            max={Math.max(0, gains.length - 1)}
+            step={1}
+            value={currentIdx}
+            disabled={disabled || gains.length === 0}
+            onChange={(e) => {
+              void handleSliderChange(Number(e.target.value));
+            }}
+          />
+          <span className="gain-control-value">
+            {gains.length > 0 ? formatDb(gains[currentIdx]) : "— dB"}
+          </span>
+        </>
+      )}
       {error && <span className="gain-control-error">{error}</span>}
-    </section>
+    </div>
   );
 };
 

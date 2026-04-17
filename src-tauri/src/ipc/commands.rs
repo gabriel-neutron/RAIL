@@ -12,6 +12,7 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Runtime, State};
 use tokio::sync::mpsc;
 
+use crate::bookmarks::{Bookmark, BookmarksStore};
 use crate::dsp::waterfall::FrameBuilder;
 use crate::error::RailError;
 use crate::hardware::stream::{
@@ -42,6 +43,15 @@ struct Session {
     tuner: Option<TunerHandle>,
     /// Discrete gain steps the hardware supports (tenths of dB).
     gains: Vec<i32>,
+    /// Current sample rate; needed to compute the LO offset on `retune`.
+    sample_rate_hz: u32,
+}
+
+/// LO offset used to push the RTL-SDR DC spike off the center bin.
+/// See `docs/DSP.md` §1 and the `fs/4` mixer in
+/// [`crate::dsp::waterfall::FrameBuilder`].
+fn lo_offset_hz(sample_rate_hz: u32) -> u32 {
+    sample_rate_hz / 4
 }
 
 /// Global, single-session state.
@@ -106,20 +116,38 @@ pub async fn start_stream<R: Runtime>(
     }
 
     let sample_rate = args.sample_rate_hz.unwrap_or(DEFAULT_SAMPLE_RATE_HZ);
+    let offset = lo_offset_hz(sample_rate);
 
     let device = RtlSdrDevice::open(0)?;
     device.set_sample_rate(sample_rate)?;
-    device.set_center_freq(args.frequency_hz)?;
+    // Park the LO `fs/4` above the user's target so the DC spike sits
+    // off-center after the DSP mixer (docs/DSP.md §1).
+    device.set_center_freq(args.frequency_hz.saturating_add(offset))?;
     // Start in auto gain; the UI can switch to manual via `set_gain`.
     device.set_tuner_gain_mode(false)?;
     let gains = device.available_gains().unwrap_or_default();
 
     let tuner = device.tuner_handle();
-    let actual_freq = device.center_freq();
+    let actual_freq = device.center_freq().saturating_sub(offset);
 
     let (iq_tx, iq_rx) = mpsc::channel::<Vec<u8>>(IQ_CHANNEL_CAPACITY);
 
-    let stream = IqStream::start(device, iq_tx, DEFAULT_USB_BUF_NUM, DEFAULT_USB_BUF_LEN)?;
+    // Fires from the reader thread if the dongle is unplugged mid-stream.
+    // Emits a `device-status` event so the UI can switch back to the
+    // "missing device" view without the process crashing in `rtlsdr_close`.
+    let disconnect_app = app.clone();
+    let on_disconnect: Box<dyn FnOnce(String) + Send + 'static> = Box::new(move |reason| {
+        log::warn!("RTL-SDR disconnected mid-stream: {reason}");
+        let _ = DeviceStatus::disconnected_with(reason).emit(&disconnect_app);
+    });
+
+    let stream = IqStream::start(
+        device,
+        iq_tx,
+        DEFAULT_USB_BUF_NUM,
+        DEFAULT_USB_BUF_LEN,
+        on_disconnect,
+    )?;
     let canceler = stream.canceler();
 
     let dsp_handle = spawn_dsp_task(iq_rx, channel, canceler);
@@ -129,6 +157,7 @@ pub async fn start_stream<R: Runtime>(
         dsp: Some(dsp_handle),
         tuner: Some(tuner),
         gains: gains.clone(),
+        sample_rate_hz: sample_rate,
     });
     drop(guard);
 
@@ -219,6 +248,130 @@ pub fn available_gains(state: State<'_, AppState>) -> Result<Vec<i32>, RailError
     Ok(guard.as_ref().map(|s| s.gains.clone()).unwrap_or_default())
 }
 
+/// Arguments for [`retune`].
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetuneArgs {
+    pub frequency_hz: u32,
+}
+
+/// Reply for [`retune`]. Reports the frequency librtlsdr actually snapped
+/// to — may differ from the request (`docs/HARDWARE.md` §4).
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetuneReply {
+    pub frequency_hz: u32,
+}
+
+/// Retune the live session to a new center frequency without tearing the
+/// IQ stream down. See `docs/DSP.md` §1 for the LO/DC-offset context.
+///
+/// Safe against the running `read_async` loop: librtlsdr serializes tuner
+/// commands internally (see [`TunerHandle`] doc).
+#[tauri::command]
+pub fn retune(args: RetuneArgs, state: State<'_, AppState>) -> Result<RetuneReply, RailError> {
+    let guard = state.session.lock().map_err(session_poisoned)?;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| RailError::InvalidParameter("stream not running".into()))?;
+    let tuner = session
+        .tuner
+        .as_ref()
+        .ok_or_else(|| RailError::InvalidParameter("tuner unavailable".into()))?;
+
+    let offset = lo_offset_hz(session.sample_rate_hz);
+    tuner.set_center_freq(args.frequency_hz.saturating_add(offset))?;
+    Ok(RetuneReply {
+        frequency_hz: tuner.center_freq().saturating_sub(offset),
+    })
+}
+
+/// Arguments for [`set_ppm`].
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetPpmArgs {
+    pub ppm: i32,
+}
+
+/// Apply a PPM crystal correction to the live session.
+/// See `docs/HARDWARE.md` §3.
+#[tauri::command]
+pub fn set_ppm(args: SetPpmArgs, state: State<'_, AppState>) -> Result<(), RailError> {
+    let guard = state.session.lock().map_err(session_poisoned)?;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| RailError::InvalidParameter("stream not running".into()))?;
+    let tuner = session
+        .tuner
+        .as_ref()
+        .ok_or_else(|| RailError::InvalidParameter("tuner unavailable".into()))?;
+
+    tuner.set_freq_correction_ppm(args.ppm)
+}
+
+/// Arguments for [`add_bookmark`].
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddBookmarkArgs {
+    pub name: String,
+    pub frequency_hz: u32,
+}
+
+/// Return the full bookmark list, sorted by creation time.
+#[tauri::command]
+pub fn list_bookmarks<R: Runtime>(
+    app: AppHandle<R>,
+    store: State<'_, BookmarksStore>,
+) -> Result<Vec<Bookmark>, RailError> {
+    store.list(&app)
+}
+
+/// Persist a new bookmark and return it (with the generated id).
+#[tauri::command]
+pub fn add_bookmark<R: Runtime>(
+    app: AppHandle<R>,
+    args: AddBookmarkArgs,
+    store: State<'_, BookmarksStore>,
+) -> Result<Bookmark, RailError> {
+    store.add(&app, args.name, args.frequency_hz)
+}
+
+/// Arguments for [`remove_bookmark`].
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveBookmarkArgs {
+    pub id: String,
+}
+
+/// Remove a bookmark by id (idempotent — missing id is not an error).
+#[tauri::command]
+pub fn remove_bookmark<R: Runtime>(
+    app: AppHandle<R>,
+    args: RemoveBookmarkArgs,
+    store: State<'_, BookmarksStore>,
+) -> Result<(), RailError> {
+    store.remove(&app, &args.id)
+}
+
+/// Arguments for [`replace_bookmarks`]. Accepts any list shape the
+/// frontend parsed from a user-supplied JSON file.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceBookmarksArgs {
+    pub bookmarks: Vec<Bookmark>,
+}
+
+/// Overwrite the on-disk bookmark list with the supplied one. Used by
+/// the "Load" menu entry when the user picks a JSON file.
+#[tauri::command]
+pub fn replace_bookmarks<R: Runtime>(
+    app: AppHandle<R>,
+    args: ReplaceBookmarksArgs,
+    store: State<'_, BookmarksStore>,
+) -> Result<Vec<Bookmark>, RailError> {
+    store.replace(&app, args.bookmarks)
+}
+
 fn session_poisoned<T>(_: std::sync::PoisonError<T>) -> RailError {
     RailError::StreamError("session lock poisoned".into())
 }
@@ -281,14 +434,21 @@ fn spawn_dsp_task(
 
 /// Register the AppState and all Phase 1 commands on a Tauri builder.
 pub fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
-    builder.manage(AppState::default()).invoke_handler(
-        tauri::generate_handler![
+    builder
+        .manage(AppState::default())
+        .manage(BookmarksStore::default())
+        .invoke_handler(tauri::generate_handler![
             ping,
             check_device,
             start_stream,
             stop_stream,
             set_gain,
             available_gains,
-        ],
-    )
+            retune,
+            set_ppm,
+            list_bookmarks,
+            add_bookmark,
+            remove_bookmark,
+            replace_bookmarks,
+        ])
 }

@@ -21,9 +21,9 @@ html,
 .app {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
-  padding: 16px 24px;
-  gap: 12px;
+  height: 100vh;
+  padding: 12px 16px;
+  gap: 10px;
 }
 
 .app-header {
@@ -31,11 +31,11 @@ html,
   align-items: baseline;
   justify-content: space-between;
   border-bottom: 1px solid #1a1f26;
-  padding-bottom: 8px;
+  padding-bottom: 6px;
 }
 
 .app-header h1 {
-  font-size: 20px;
+  font-size: 18px;
   letter-spacing: 0.12em;
   margin: 0;
   color: #f2f4f8;
@@ -43,8 +43,9 @@ html,
 
 .app-status {
   display: flex;
-  gap: 24px;
+  gap: 16px;
   color: #8793a0;
+  font-size: 12px;
 }
 
 .app-status code {
@@ -52,75 +53,419 @@ html,
   background-color: #141a22;
   padding: 2px 6px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 11px;
 }
 
-.app-controls {
-  display: flex;
-  gap: 24px;
-  align-items: center;
-  padding: 8px 0;
+.app-status .device-refresh {
+  margin-left: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: #d7dde3;
+  background-color: #1a2230;
+  border: 1px solid #2a3442;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
 }
+
+.app-status .device-refresh:hover {
+  background-color: #243046;
+  border-color: #3a4a5e;
+}
+
+.app-status .device-refresh:active {
+  background-color: #141a22;
+}
+
+/* -------- Control panel -------- */
+
+.control-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #1a1f26;
+  border-radius: 6px;
+  background-color: #10151b;
+}
+
+.control-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+/* -------- FrequencyControl -------- */
 
 .frequency-control {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .frequency-control-label {
   color: #8793a0;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: 11px;
+  font-size: 10px;
+}
+
+.frequency-control-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .frequency-control-value {
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 20px;
+  font-size: 22px;
   color: #e7ebf1;
+  letter-spacing: 0.02em;
 }
+
+.frequency-control-units {
+  display: inline-flex;
+  gap: 2px;
+  border: 1px solid #1a1f26;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.unit-btn {
+  background: transparent;
+  color: #8793a0;
+  border: none;
+  padding: 3px 10px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.unit-btn:hover {
+  color: #d7dde3;
+}
+
+.unit-btn-active {
+  background-color: #1a2a3a;
+  color: #3aa0ff;
+}
+
+.frequency-control-input {
+  background-color: #141a22;
+  border: 1px solid #1a1f26;
+  color: #e7ebf1;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 13px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  width: 100%;
+}
+
+.frequency-control-input:focus {
+  outline: none;
+  border-color: #3aa0ff;
+}
+
+.frequency-control-steps {
+  display: flex;
+  gap: 4px;
+}
+
+.step-btn {
+  flex: 1;
+  background-color: #141a22;
+  color: #d7dde3;
+  border: 1px solid #1a1f26;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.step-btn:hover {
+  background-color: #1a2a3a;
+  border-color: #3aa0ff;
+  color: #3aa0ff;
+}
+
+/* -------- GainControl -------- */
 
 .gain-control {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 260px;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
 }
 
-.gain-control-row {
+.gain-control-auto {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  font-size: 12px;
+  color: #d7dde3;
+  cursor: pointer;
+  user-select: none;
 }
 
-.gain-control-row input[type="range"] {
+.gain-control-auto input[type="checkbox"] {
+  accent-color: #3aa0ff;
+}
+
+.gain-control-slider-label {
+  color: #8793a0;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 10px;
+}
+
+.gain-control-slider {
   flex: 1;
+  min-width: 80px;
   accent-color: #3aa0ff;
 }
 
 .gain-control-value {
   font-family: "JetBrains Mono", ui-monospace, monospace;
   color: #d7dde3;
-  min-width: 64px;
+  font-size: 12px;
+  min-width: 56px;
   text-align: right;
 }
 
 .gain-control-error {
   color: #ff5470;
-  font-size: 12px;
+  font-size: 11px;
 }
+
+/* -------- PpmControl -------- */
+
+.ppm-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.ppm-control-label {
+  color: #8793a0;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 10px;
+}
+
+.ppm-control-input {
+  background-color: #141a22;
+  border: 1px solid #1a1f26;
+  color: #e7ebf1;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  width: 56px;
+  text-align: right;
+}
+
+.ppm-control-input:focus {
+  outline: none;
+  border-color: #3aa0ff;
+}
+
+.ppm-control-input:disabled {
+  color: #4a525c;
+}
+
+.ppm-control-error {
+  color: #ff5470;
+  font-size: 11px;
+}
+
+/* -------- MenuBar -------- */
+
+.menu-bar {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  background-color: #10151b;
+  border: 1px solid #1a1f26;
+  border-radius: 4px;
+  padding: 2px;
+  position: relative;
+  z-index: 10;
+}
+
+.menu-top {
+  background: transparent;
+  color: #d7dde3;
+  border: none;
+  padding: 4px 12px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.menu-top:hover:not(:disabled) {
+  background-color: #1a2a3a;
+  color: #3aa0ff;
+}
+
+.menu-top:disabled {
+  color: #4a525c;
+  cursor: default;
+}
+
+.menu-top-open {
+  background-color: #1a2a3a;
+  color: #3aa0ff;
+}
+
+.menu-group {
+  position: relative;
+}
+
+.menu-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 240px;
+  background-color: #10151b;
+  border: 1px solid #1a1f26;
+  border-radius: 4px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  z-index: 20;
+}
+
+.menu-item {
+  background: transparent;
+  color: #d7dde3;
+  border: none;
+  text-align: left;
+  padding: 6px 10px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.menu-item:hover {
+  background-color: #1a2a3a;
+  color: #3aa0ff;
+}
+
+/* -------- Bookmark list inside the menu dropdown -------- */
+
+.menu-separator {
+  height: 1px;
+  background-color: #1a1f26;
+  margin: 4px 0;
+}
+
+.menu-section-label {
+  padding: 4px 10px 2px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #8793a0;
+}
+
+.menu-empty {
+  padding: 4px 10px 6px;
+  color: #8793a0;
+  font-size: 11px;
+  font-style: italic;
+}
+
+.menu-bookmarks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.menu-bookmark {
+  display: flex;
+  align-items: stretch;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.menu-bookmark:hover {
+  background-color: #141a22;
+}
+
+.menu-bookmark-tune {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  background: transparent;
+  color: #d7dde3;
+  border: none;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px;
+  text-align: left;
+}
+
+.menu-bookmark-tune:hover {
+  color: #3aa0ff;
+}
+
+.menu-bookmark-name {
+  font-weight: 500;
+}
+
+.menu-bookmark-freq {
+  color: #8793a0;
+  font-size: 11px;
+}
+
+.menu-bookmark-delete {
+  background: transparent;
+  color: #4a525c;
+  border: none;
+  padding: 0 10px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.menu-bookmark-delete:hover {
+  background-color: #2a1414;
+  color: #ff5470;
+}
+
+.menu-error {
+  padding: 4px 10px;
+  color: #ff5470;
+  font-size: 11px;
+}
+
+/* -------- Waterfall -------- */
 
 .waterfall {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   flex: 1;
   min-height: 0;
 }
 
 .waterfall-status {
-  font-size: 12px;
+  font-size: 11px;
   color: #8793a0;
   font-family: "JetBrains Mono", ui-monospace, monospace;
 }
@@ -139,9 +484,11 @@ html,
 
 .waterfall-canvas {
   width: 100%;
-  height: 400px;
+  flex: 1;
+  min-height: 0;
   background-color: #07090c;
   border: 1px solid #1a1f26;
   image-rendering: pixelated;
   display: block;
+  cursor: crosshair;
 }

@@ -230,7 +230,6 @@ impl RtlSdrDevice {
     }
 
     /// PPM crystal correction (see `docs/HARDWARE.md` §3).
-    #[allow(dead_code)] // Exposed in Phase 2 when the UI setting lands.
     pub fn set_freq_correction_ppm(&self, ppm: i32) -> Result<(), RailError> {
         // librtlsdr returns -2 when the correction is unchanged; treat as OK.
         // SAFETY: handle owned by self.
@@ -361,6 +360,29 @@ impl TunerHandle {
         if rc != 0 {
             return Err(RailError::StreamError(format!(
                 "rtlsdr_set_tuner_gain({tenths_db}) -> {rc}"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Read back the currently tuned center frequency. librtlsdr snaps the
+    /// requested Hz to the tuner's resolution; the UI uses this value to
+    /// reflect what actually happened after [`Self::set_center_freq`].
+    pub fn center_freq(&self) -> u32 {
+        // SAFETY: see type-level doc.
+        unsafe { ffi::rtlsdr_get_center_freq(self.ptr) }
+    }
+
+    /// PPM crystal correction while streaming. See `docs/HARDWARE.md` §3.
+    ///
+    /// librtlsdr returns `-2` when the requested value matches the current
+    /// one — treated as success.
+    pub fn set_freq_correction_ppm(&self, ppm: i32) -> Result<(), RailError> {
+        // SAFETY: see type-level doc.
+        let rc = unsafe { ffi::rtlsdr_set_freq_correction(self.ptr, ppm) };
+        if rc != 0 && rc != -2 {
+            return Err(RailError::StreamError(format!(
+                "rtlsdr_set_freq_correction({ppm}) -> {rc}"
             )));
         }
         Ok(())

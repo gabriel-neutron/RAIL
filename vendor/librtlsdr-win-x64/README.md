@@ -16,7 +16,7 @@ root `.gitignore`): they are redistributable but out of scope for this repo.
 ## Where to get them
 
 Official upstream build:
-<https://ftp.osmocom.org/binaries/windows/rtl-sdr/rtl-sdr-64bit-20230830.zip>
+<https://github.com/rtlsdrblog/rtl-sdr-blog/releases/tag/v1.3.6>
 
 Extract the contents of the zip's `rtl-sdr-64bit-.../` (or `Release/x64/`)
 folder directly into this directory.
