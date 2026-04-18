@@ -101,10 +101,10 @@
 
 **Goal**: user can save and revisit captures.
 
-- [ ] Audio recording (WAV, PCM float32, 44100 Hz)
-- [ ] Waterfall screenshot (PNG)
-- [ ] IQ clip capture (SigMF format — see SIGNALS.md §1)
-- [ ] Open/play back audio recording
+- [X] Audio recording (WAV, PCM float32, 44100 Hz)
+- [X] Waterfall screenshot (PNG)
+- [X] IQ clip capture (SigMF format — see SIGNALS.md §1)
+- [X] Open/play back audio recording
 
 **Exit criterion**: capture a signal, close app, reopen, find the session, play it back.
 
@@ -114,15 +114,15 @@
 
 **Goal**: public-ready V1.0 on GitHub.
 
-- [ ] README.md with screenshots and demo GIF
-- [ ] Installation instructions for Linux, macOS, Windows
-- [ ] Platform-specific driver notes (udev rules, Zadig)
-- [ ] `CONTRIBUTING.md` (brief, since solo project)
-- [ ] GitHub Actions CI (cargo build + clippy)
-- [ ] GitHub release with binary artifacts (Tauri produces installers)
-- [ ] All `clippy` warnings resolved
-- [ ] No `unwrap()` in non-test code
-- [ ] All `/docs/` files reviewed and accurate
+- [X] README.md with screenshots and demo GIF
+- [X] Installation instructions for Linux, macOS, Windows
+- [X] Platform-specific driver notes (udev rules, Zadig)
+- [X] `CONTRIBUTING.md` (brief, since solo project)
+- [X] GitHub Actions CI (cargo build + clippy)
+- [X] GitHub release with binary artifacts (Tauri produces installers)
+- [X] All `clippy` warnings resolved
+- [X] No `unwrap()` in non-test code
+- [X] All `/docs/` files reviewed and accurate
 
 **Exit criterion**: a stranger can clone, install, and use the app following the README.
 

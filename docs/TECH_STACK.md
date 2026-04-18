@@ -8,14 +8,14 @@
 | Backend language | Rust | stable | Performance, safety, librtlsdr FFI |
 | Frontend language | TypeScript | 5.x | Type safety for IPC contracts |
 | Frontend framework | React | 19 | Component model, hooks, canvas integration |
-| State management | Zustand | 4.x | Minimal, no boilerplate |
+| State management | Zustand | 5.x | Minimal, no boilerplate |
 | FFT | rustfft | 6.x | Proven, fast, pure Rust |
-| RTL-SDR binding | rtlsdr-rs + raw FFI | latest | Direct hardware access |
+| RTL-SDR binding | hand-written FFI (`src/hardware/ffi.rs`) | librtlsdr | Direct hardware access, no `bindgen` |
 | Capture format | SigMF | 1.0 | Community standard |
 | Audio playback | Web Audio API | native | Browser API, no lib needed |
 | Canvas rendering | Canvas API | native | No waterfall libs |
-| Styling | CSS Modules | native | Scoped, no runtime |
-| Build tool | Vite | 5.x | Fast, Tauri default |
+| Styling | plain CSS | native | Scoped via class names, no runtime |
+| Build tool | Vite | 7.x | Fast, Tauri default |
 | Linting (Rust) | clippy | bundled | Zero warnings policy |
 | Linting (TS) | ESLint + strict TS | latest | No `any` policy |
 
@@ -29,12 +29,17 @@
 tauri = { version = "2", features = [] }
 tauri-build = "2"
 
-# RTL-SDR
-rtlsdr = "0.1"          # rtlsdr-rs — evaluate at scaffold time
-                          # fallback: raw FFI via libloading
+# RTL-SDR: hand-written FFI, no crate — see src-tauri/src/hardware/ffi.rs
 
 # FFT
 rustfft = "6"
+num-complex = "0.4"
+
+# Byte-level helpers
+bytemuck = "1"
+
+# USB enumeration (device detection)
+nusb = "0.1"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -50,13 +55,13 @@ env_logger = "0.11"
 # Error handling
 thiserror = "1"
 
-# Optional: IIR filters for de-emphasis
-# biquad = "0.4"
+# Tauri plugins
+tauri-plugin-dialog = "2"
 ```
 
-**Note on rtlsdr-rs**: evaluate crate maturity at scaffold time.
-If the crate is insufficient, use raw `unsafe` FFI against the system
-librtlsdr. Document the decision in a comment in `hardware/mod.rs`.
+**Note on RTL-SDR binding**: RAIL uses a hand-written `unsafe` FFI against
+the system `librtlsdr` (see `src-tauri/src/hardware/ffi.rs`). No `bindgen`,
+no third-party wrapper crate — the surface is small and stable.
 
 ---
 
@@ -66,17 +71,18 @@ librtlsdr. Document the decision in a comment in `hardware/mod.rs`.
 {
   "dependencies": {
     "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
     "react": "^19",
     "react-dom": "^19",
-    "zustand": "^4"
+    "zustand": "^5"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "typescript": "^5",
-    "vite": "^5",
-    "@vitejs/plugin-react": "^4",
-    "eslint": "^8"
+    "typescript": "~5.8",
+    "vite": "^7",
+    "@vitejs/plugin-react": "^4"
   }
 }
 ```
@@ -89,16 +95,18 @@ No component kits (MUI, Chakra, Ant) — RAIL has a custom UI.
 ## 4. Platform prerequisites
 
 ### All platforms
-- Rust toolchain (rustup, stable)
+- Rust toolchain (rustup, stable, 1.85+)
 - Node.js 20+
-- Tauri CLI v2 (`cargo install tauri-cli`)
+- Tauri CLI v2 (bundled via `@tauri-apps/cli` devDep — no `cargo install` needed)
 - librtlsdr installed (platform-specific, see below)
 
-### Linux
+### Linux (Debian / Ubuntu)
 ```bash
-sudo apt install librtlsdr-dev librtlsdr0
-# udev rules for non-root USB access:
-# copy 99-rtlsdr.rules to /etc/udev/rules.d/
+sudo apt install librtlsdr-dev librtlsdr0 \
+                 libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+                 libssl-dev libgtk-3-dev libsoup-3.0-dev \
+                 build-essential curl wget pkg-config
+# Non-root USB access: see the udev rules block in the root README.
 ```
 
 ### macOS
@@ -107,29 +115,38 @@ brew install librtlsdr
 ```
 
 ### Windows
-- Install Zadig → replace RTL-SDR driver with WinUSB
-- Install librtlsdr via MSYS2 or prebuilt DLL
-- Set `LIBRTLSDR_LIB_DIR` env var for build
+- Install [Zadig](https://zadig.akeo.ie/) → replace the dongle's driver
+  with **WinUSB** (see `HARDWARE.md` §6).
+- Drop the librtlsdr prebuilts (`rtlsdr.dll`, `rtlsdr.lib`,
+  `pthreadVC2.dll`, `msvcr100.dll`) into `vendor/librtlsdr-win-x64/`,
+  or set `LIBRTLSDR_LIB_DIR` to a folder containing them. The build
+  script copies the runtime DLLs next to the target binary automatically.
 
 ---
 
 ## 5. Build commands
 
 ```bash
-# Development (hot reload)
-cargo tauri dev
+# Install JS deps (first run only)
+npm install
 
-# Production build
-cargo tauri build
+# Development (hot reload)
+npm run tauri dev
+
+# Production build (bundles installers under src-tauri/target/release/bundle/)
+npm run tauri build
 
 # Rust lint
-cargo clippy -- -D warnings
+cargo clippy --all-targets -- -D warnings
 
 # TypeScript check
 npx tsc --noEmit
 
-# Run tests
-cargo test
+# Frontend build
+npm run build
+
+# Rust tests
+cargo test --lib
 ```
 
 ---

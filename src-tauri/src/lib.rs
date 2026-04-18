@@ -17,7 +17,8 @@ pub fn run() {
 
     let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
     let builder = ipc::commands::register(builder);
-    builder
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    if let Err(err) = builder.run(tauri::generate_context!()) {
+        log::error!("tauri runtime exited with error: {err}");
+        std::process::exit(1);
+    }
 }

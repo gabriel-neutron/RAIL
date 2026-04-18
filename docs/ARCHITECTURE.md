@@ -42,20 +42,24 @@ RAIL is a **Tauri v2** desktop application.
 ```
 hardware/
   mod.rs          ← RTL-SDR open/close/configure
-  stream.rs       ← IQ sample reader, ring buffer
+  stream.rs       ← IQ sample reader, async cancel
+  ffi.rs          ← hand-written librtlsdr bindings
 dsp/
   mod.rs
-  fft.rs          ← FFT pipeline (rustfft wrapper)
-  waterfall.rs    ← magnitude, dB, FFT shift
+  input.rs        ← u8 → Complex<f32> conversion
+  fft.rs          ← rustfft wrapper + Hann window
+  waterfall.rs    ← magnitude, dB, FFT shift, frame builder
+  filter.rs       ← decimation, de-emphasis, resampling
   demod/
     fm.rs         ← FM demodulation (owned)
     am.rs         ← AM demodulation (owned)
-    ssb.rs        ← SSB stub (V1.1)
-  filter.rs       ← decimation, window functions
 capture/
   mod.rs
-  sigmf.rs        ← SigMF read/write
-  session.rs      ← session metadata
+  sigmf.rs        ← streaming SigMF IQ writer
+  wav.rs          ← streaming WAV PCM writer
+  tmp.rs          ← temp-file helpers for stage-then-finalize
+replay.rs         ← SigMF playback (open, seek, play)
+bookmarks.rs      ← user frequency bookmarks (JSON store)
 ipc/
   commands.rs     ← Tauri command handlers
   events.rs       ← binary event emitters
@@ -65,16 +69,19 @@ ipc/
 
 ```
 components/
-  Waterfall.tsx       ← canvas rendering, colormap
+  Waterfall/          ← canvas rendering, colormap, zoom
   FrequencyControl/   ← frequency input, step buttons
-  ModeSelector/       ← CW/AM/FM/USB/LSB buttons
-  FilterControl/      ← bandwidth controls
-  SignalMeter/        ← dBm display
-  AudioControls/      ← volume, mute, record
-  CapturePanel/       ← session list, export
+  ModeSelector/       ← AM/FM buttons
+  FilterBandMarker/   ← shaded filter width on waterfall
+  SignalMeter/        ← current + peak dBm display
+  AudioControls/      ← volume, mute, squelch
+  Transport/          ← record / IQ clip / screenshot / replay
+  MenuBar/            ← app menus, bookmarks, settings
+  PpmControl/         ← PPM correction input
 store/
-  radio.ts            ← zustand store (tuned freq, mode, gain)
-  session.ts          ← capture session state
+  radio.ts            ← zustand: tuned freq, mode, gain, filter
+  capture.ts          ← zustand: recording state + outputs
+  replay.ts           ← zustand: replay playback state
 hooks/
   useWaterfall.ts     ← binary event listener → canvas
   useAudio.ts         ← PCM stream → Web Audio API

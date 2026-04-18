@@ -1,110 +1,67 @@
+<div align="center">
+
 # RAIL
 
-**Rust-based Application for Intelligent Listening.** A desktop SDR
-receiver that streams IQ samples from a
-[NESDR Smart v5](https://www.nooelec.com/store/nesdr-smart.html)
-(or any RTL2832U-based dongle), runs the DSP pipeline in Rust, and
-renders a live spectrum waterfall in a Tauri + React UI.
+### *Radio Analysis & Intel Lab*
 
-> **Status — Phase 1 (IQ → FFT → waterfall):** the app opens the
-> dongle, streams IQ in real time, computes a windowed FFT in dB, and
-> paints a scrolling waterfall at ~25 fps.
-> Next phases: AM/FM/SSB demod, tuning UI, recording. See
-> [`docs/TIMELINE.md`](docs/TIMELINE.md).
+**A hands-on SDR desktop app — built to learn how the radio chain actually works.**
 
-![Waterfall screenshot showing the FM broadcast band around 100 MHz](docs/assets/waterfall-phase1.png)
+<br />
 
-## Highlights
+<img src="docs/assets/image.png" alt="RAIL — live waterfall, spectrum, and controls" width="960" />
 
-- **Rust backend, zero-GC DSP**: `rustfft` + `num-complex` + hand-tuned
-  Hann windowing; samples flow through a bounded tokio `mpsc` with
-  backpressure and a 25 fps emission cap.
-- **Hand-written `librtlsdr` FFI** in `src-tauri/src/hardware/ffi.rs`
-  (no `bindgen`, no runtime surprises). RAII device wrapper,
-  panic-safe C callback, thread-safe cancel/tune handle.
-- **Binary Tauri IPC**: FFT frames travel as raw `Float32` blobs over
-  `tauri::ipc::Channel<InvokeResponseBody::Raw>` — no JSON in the hot
-  path.
-- **React 19 + Zustand + native Canvas 2D**: custom 6-stop perceptual
-  colormap, `drawImage`-based scroll for O(1) per-frame rendering.
+<br />
 
-## Architecture
+[![Rust](https://img.shields.io/badge/Rust-backend-DEA584?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Tauri](https://img.shields.io/badge/Tauri-desktop-FFC131?style=for-the-badge&logo=tauri&logoColor=000)](https://tauri.app/)
+[![React](https://img.shields.io/badge/React-UI-61DAFB?style=for-the-badge&logo=react&logoColor=000)](https://react.dev/)
 
-```
-USB  ─►  librtlsdr (blocking std::thread)
-          │  u8 IQ samples, 32 KiB buffers
-          ▼
-       tokio mpsc (depth 8, drop newest on overflow)
-          │
-          ▼
-       DSP task  ─  iq_u8 → Complex<f32> → Hann × FFT → 20·log10
-          │                                              │
-          │                               emit throttle  ▼
-          ▼                                      Channel<Raw bytes>
-   stop/cancel on ──────────────────────────────────────┘
-   frontend disconnect
-                                                         │
-                                                         ▼
-                                                   React hook
-                                                  (rAF drain)
-                                                         │
-                                                         ▼
-                                             Canvas waterfall
-```
+</div>
 
-Full details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md),
-[`docs/DSP.md`](docs/DSP.md), [`docs/HARDWARE.md`](docs/HARDWARE.md).
+---
 
-## Getting started
+## Why this project
 
-### Prerequisites
+This is an **educational build**: I wanted to go past “press play in someone else’s app” and **own the path from antenna samples to something I can see and hear**. Along the way I cared about **craft** — a clear, dark UI that feels like a real tool, even though the goal is understanding, not beating mature SDR suites on every metric.
 
-- Rust stable (1.85+)
-- Node 20+ and npm
-- [Zadig](https://zadig.akeo.ie/) to install the **WinUSB** driver for
-  the RTL-SDR dongle on Windows (see `docs/HARDWARE.md` §1).
-- The `librtlsdr` Windows x64 prebuilts, placed under
-  `vendor/librtlsdr-win-x64/` — see that folder's
-  [README](vendor/librtlsdr-win-x64/README.md).
+If you’re hiring: it’s a deliberate **full-stack signal-processing exercise** (hardware-facing backend + real-time UI), documented and iterated in the open.
 
-### Run
+---
 
-```powershell
-npm install
-npm run tauri dev
-```
+## What you get
 
-The first build compiles the Rust backend, links against
-`rtlsdr.lib`, and copies `rtlsdr.dll`, `pthreadVC2.dll`, and
-`msvcr100.dll` next to the dev binary so the app runs without
-touching `PATH`.
+| | |
+| :--- | :--- |
+| **Live waterfall** | Scrolls in real time so you can *see* activity across the band |
+| **Spectrum trace** | Magnitude curve above the waterfall for a quick read on peaks |
+| **Tune the dial** | Frequency entry, steps, and click on the waterfall to jump |
+| **FM & AM** | Listen through the app — the fun part after you find a carrier |
+| **Signal meter** | Level + peak hold so strong vs weak signals are obvious |
+| **Bookmarks** | Save stations or frequencies you care about |
+| **PPM correction** | Dial in the dongle when you want things to line up |
+| **Capture** | Audio to disk, IQ clips, waterfall screenshots |
+| **Replay** | Open what you saved and walk through it again |
 
-### Checks
+---
 
-```powershell
-# Rust
-cargo clippy --all-targets -- -D warnings
-cargo test --lib
+## What I’ve verified
 
-# Frontend
-npx tsc --noEmit
-npm run build
-```
+So far I’ve only run this on **Windows** with **my RTL-SDR dongle**. Other setups *might* work — I just **haven’t verified** them. If something breaks on your machine, that’s useful signal; the repo is as much a **learning log** as a product.
 
-## Repository layout
+---
 
-```
-src/                React 19 + TypeScript frontend (Vite)
-src-tauri/          Rust backend (Tauri v2)
-  ├─ src/hardware/  librtlsdr FFI, RAII device, async IQ reader
-  ├─ src/dsp/       Hann, FFT, dB, fft_shift, frame builder
-  ├─ src/ipc/       Tauri commands + events
-  └─ build.rs       Linker + runtime DLL staging
-docs/               PRD, architecture, DSP notes, conventions
-vendor/             Native prebuilts (gitignored)
-```
+## Feedback
+
+**All feedback is welcome** — issues, ideas, “this confused me,” or “have you thought about…”. I’m building in public partly to learn from other people who care about RF, Rust, or UI. Don’t hesitate to reach out.
+
+---
+
+## Going deeper
+
+Technical notes, architecture, and DSP references live in [`docs/`](docs/). If you want to contribute code or run checks locally, see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+---
 
 ## License
 
-TBD. This repo is currently a portfolio project and is not yet
-licensed for redistribution.
+Not finalized yet — treat this as a **portfolio / educational** repo until a proper license is added.
