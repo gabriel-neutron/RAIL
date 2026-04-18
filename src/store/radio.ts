@@ -20,6 +20,18 @@ export const UNIT_SCALE: Record<FreqUnit, number> = {
   MHz: 1_000_000,
 };
 
+/// Signal strength snapshot (dBFS). Fed by the `signal-level` event.
+export type SignalLevel = {
+  currentDbfs: number;
+  peakDbfs: number;
+};
+
+/// Waterfall zoom range. Frontend-only crop of the FFT frame —
+/// backend keeps a constant FFT size. Continuous (not stepped) so
+/// the scroll-wheel handler can multiply by a smooth factor.
+export const ZOOM_MIN = 1;
+export const ZOOM_MAX = 64;
+
 export type RadioState = {
   frequencyHz: number;
   sampleRateHz: number;
@@ -35,6 +47,11 @@ export type RadioState = {
   muted: boolean;
   /// Squelch threshold in dBFS. `null` = gate disabled.
   squelchDbfs: number | null;
+  /// Frontend waterfall/spectrum zoom factor. 1 = full fs span.
+  zoom: number;
+  /// Latest dBFS level snapshot from the backend; `null` before the
+  /// first event arrives (e.g. no stream yet).
+  signalLevel: SignalLevel | null;
   setFrequency: (hz: number) => void;
   setSampleRate: (hz: number) => void;
   setMode: (mode: DemodMode) => void;
@@ -48,6 +65,8 @@ export type RadioState = {
   setVolume: (v: number) => void;
   setMuted: (m: boolean) => void;
   setSquelchDbfs: (db: number | null) => void;
+  setZoom: (zoom: number) => void;
+  setSignalLevel: (level: SignalLevel | null) => void;
 };
 
 const RETUNE_DEBOUNCE_MS = 30;
@@ -117,6 +136,8 @@ export const useRadioStore = create<RadioState>((set, get) => ({
   volume: 0.7,
   muted: false,
   squelchDbfs: null,
+  zoom: 1,
+  signalLevel: null,
   setFrequency: (frequencyHz) => {
     // Round to integer Hz — the backend `retune` command deserializes
     // `frequencyHz` as `u32`, so fractional values (e.g. from click-to-tune
@@ -163,4 +184,10 @@ export const useRadioStore = create<RadioState>((set, get) => ({
     set({ squelchDbfs });
     scheduleSquelch(squelchDbfs, get().streaming);
   },
+  setZoom: (zoom) => {
+    if (!Number.isFinite(zoom)) return;
+    const clamped = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom));
+    set({ zoom: clamped });
+  },
+  setSignalLevel: (signalLevel) => set({ signalLevel }),
 }));

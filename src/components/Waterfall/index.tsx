@@ -1,126 +1,370 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useWaterfall } from "../../hooks/useWaterfall";
 import { useRadioStore } from "../../store/radio";
+import FilterBandMarker from "../FilterBandMarker";
+import FrequencyAxis from "../FrequencyAxis";
+import Spectrum from "../Spectrum";
 import { buildColormapLut } from "./colormap";
 
 const DEFAULT_FFT_SIZE = 2048;
-const DISPLAY_HEIGHT = 400;
+const WATERFALL_HEIGHT = 360;
+const SPECTRUM_HEIGHT = 90;
 const DB_FLOOR = -100;
 const DB_PEAK = -20;
+/// Cumulative pointer-motion threshold (px) that distinguishes a
+/// click-to-tune from a pan-to-retune gesture.
+const DRAG_THRESHOLD_PX = 4;
+/// Background fill used when the drag shift exposes a blank strip
+/// on the waterfall canvas. Matches `.waterfall-canvas`'s CSS bg.
+const WATERFALL_BG = "#07090c";
 
 type WaterfallProps = {
   enabled?: boolean;
   onAudio?: (frame: Float32Array) => void;
 };
 
+/// Crop the center `len/zoom` bins of a shifted FFT frame. After the
+/// `fs/4` digital mixer + FFT shift, the user's target sits at bin
+/// `N/2`, so a symmetric slice around the middle keeps the tuned
+/// signal centered at any zoom level (docs/DSP.md §1–3).
+const cropCenter = (frame: Float32Array, zoom: number): Float32Array => {
+  if (zoom <= 1) return frame;
+  const kept = Math.max(16, Math.floor(frame.length / zoom));
+  const start = Math.floor((frame.length - kept) / 2);
+  return frame.subarray(start, start + kept);
+};
+
 export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const waterfallCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const spectrumCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const rowImageRef = useRef<ImageData | null>(null);
   const lut = useMemo(() => buildColormapLut(256), []);
+
+  const zoom = useRadioStore((s) => s.zoom);
+  const sampleRateHz = useRadioStore((s) => s.sampleRateHz);
+
+  const zoomRef = useRef(zoom);
+  useEffect(() => {
+    zoomRef.current = zoom;
+  }, [zoom]);
+
+  // Scroll wheel zoom. React's synthetic onWheel is passive by
+  // default, so `preventDefault()` inside a synthetic handler is a
+  // no-op — attach a native listener with `passive: false` instead.
+  useEffect(() => {
+    const canvas = waterfallCanvasRef.current;
+    if (!canvas) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      if (e.deltaY === 0) return;
+      const factor = e.deltaY < 0 ? 1.25 : 1 / 1.25;
+      const store = useRadioStore.getState();
+      store.setZoom(store.zoom * factor);
+    };
+    canvas.addEventListener("wheel", handler, { passive: false });
+    return () => canvas.removeEventListener("wheel", handler);
+  }, []);
+
+  // Flag consumed by the `onFrame` callback below. While the user is
+  // drag-panning the waterfall we skip row draws so the CSS-shifted
+  // old content stays coherent (new rows would paint at the wrong
+  // canvas-X relative to the transform and tear visibly). Spectrum
+  // keeps updating so the user still sees live magnitude.
+  const isDraggingRef = useRef(false);
 
   const { session, error } = useWaterfall({
     enabled,
     onAudio,
-    onFrame: (frame) => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d", { alpha: false });
-      if (!ctx) return;
-
-      if (canvas.width !== frame.length) {
-        canvas.width = frame.length;
+    onFrame: (rawFrame) => {
+      const frame = cropCenter(rawFrame, zoomRef.current);
+      if (!isDraggingRef.current) {
+        drawWaterfallRow(waterfallCanvasRef.current, frame, rowImageRef, lut);
       }
-      if (canvas.height !== DISPLAY_HEIGHT) {
-        canvas.height = DISPLAY_HEIGHT;
-      }
-
-      if (
-        rowImageRef.current === null ||
-        rowImageRef.current.width !== frame.length
-      ) {
-        rowImageRef.current = ctx.createImageData(frame.length, 1);
-      }
-
-      const row = rowImageRef.current;
-      const pixels = row.data;
-      const span = DB_PEAK - DB_FLOOR;
-      const lutEntries = lut.length / 3;
-      for (let i = 0; i < frame.length; i += 1) {
-        const normalized = Math.max(
-          0,
-          Math.min(1, (frame[i] - DB_FLOOR) / span),
-        );
-        const lutIdx = (normalized * (lutEntries - 1)) | 0;
-        const offset = lutIdx * 3;
-        const out = i * 4;
-        pixels[out] = lut[offset];
-        pixels[out + 1] = lut[offset + 1];
-        pixels[out + 2] = lut[offset + 2];
-        pixels[out + 3] = 255;
-      }
-
-      ctx.drawImage(
-        canvas,
-        0,
-        0,
-        canvas.width,
-        canvas.height - 1,
-        0,
-        1,
-        canvas.width,
-        canvas.height - 1,
-      );
-      ctx.putImageData(row, 0, 0);
+      drawSpectrum(spectrumCanvasRef.current, frame);
     },
   });
 
   useEffect(() => {
-    const canvas = canvasRef.current;
+    const canvas = waterfallCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) return;
     ctx.fillStyle = "#07090c";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-  }, [session?.fftSize]);
+    // Reset the row buffer so the new frame length is used on the
+    // next draw (zoom change shrinks/grows the frame).
+    rowImageRef.current = null;
+  }, [session?.fftSize, zoom]);
 
-  // Pixel X → frequency mapping: DC lands at bin N/2 after `fft_shift`
-  // (docs/DSP.md §1–3; verified by `dc_input_peaks_at_center_after_shift`).
-  // So pixel X over the canvas span maps linearly to [-fs/2, +fs/2].
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
+  // Pointer lifecycle for pan-to-retune with click-to-tune fallback.
+  // Under 4 px of cumulative movement the gesture is treated as a
+  // click; above that the drag has already retuned via repeated
+  // setFrequency calls (debounced in the store).
+  const dragStateRef = useRef<{
+    startX: number;
+    startHz: number;
+    moved: number;
+  } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const pxToOffsetHz = (px: number, rectWidth: number): number => {
+    const store = useRadioStore.getState();
+    const displayedSpan = store.sampleRateHz / store.zoom;
+    return (px / rectWidth) * displayedSpan;
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.button !== 0) return;
+    const canvas = waterfallCanvasRef.current;
     if (!canvas) return;
     const store = useRadioStore.getState();
     if (!store.streaming) return;
+    canvas.setPointerCapture(e.pointerId);
+    dragStateRef.current = {
+      startX: e.clientX,
+      startHz: store.frequencyHz,
+      moved: 0,
+    };
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const drag = dragStateRef.current;
+    if (drag === null) return;
+    const canvas = waterfallCanvasRef.current;
+    if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     if (rect.width <= 0) return;
-    const xNorm = (e.clientX - rect.left) / rect.width;
-    const offsetHz = (xNorm - 0.5) * store.sampleRateHz;
-    store.setFrequency(store.frequencyHz + offsetHz);
+    const deltaPx = e.clientX - drag.startX;
+    drag.moved = Math.max(drag.moved, Math.abs(deltaPx));
+    if (drag.moved < DRAG_THRESHOLD_PX) return;
+    if (!isDragging) {
+      setIsDragging(true);
+      isDraggingRef.current = true;
+    }
+    // Drag right = content right = tuned center lower, so negate the
+    // px→Hz mapping to feel like panning a map. Live retune updates
+    // the axis + spectrum + marker; CSS transform visually shifts
+    // the cached waterfall rows to follow the cursor.
+    const deltaHz = -pxToOffsetHz(deltaPx, rect.width);
+    useRadioStore.getState().setFrequency(drag.startHz + deltaHz);
+    canvas.style.transform = `translateX(${deltaPx}px)`;
   };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const drag = dragStateRef.current;
+    if (drag === null) return;
+    dragStateRef.current = null;
+    const wasDragging = isDraggingRef.current;
+    isDraggingRef.current = false;
+    setIsDragging(false);
+    const canvas = waterfallCanvasRef.current;
+    if (canvas && canvas.hasPointerCapture(e.pointerId)) {
+      canvas.releasePointerCapture(e.pointerId);
+    }
+
+    if (wasDragging && canvas) {
+      // Bake the CSS translation into the pixel buffer so the cached
+      // history stays aligned with the new tuned center once the
+      // transform is removed. Without this, resetting transform to 0
+      // would snap the old rows back to their original canvas X,
+      // breaking continuity with rows that arrive post-release.
+      const deltaPxScreen = e.clientX - drag.startX;
+      const rect = canvas.getBoundingClientRect();
+      const scale = rect.width > 0 ? canvas.width / rect.width : 1;
+      const deltaPxCanvas = Math.round(deltaPxScreen * scale);
+      if (deltaPxCanvas !== 0) {
+        shiftCanvasContent(canvas, deltaPxCanvas);
+      }
+      canvas.style.transform = "";
+      return;
+    }
+
+    // Click-to-tune fallback: tap without crossing the drag
+    // threshold. After `fs/4` shift the signal sits at canvas
+    // center, so pixel X maps linearly across the span.
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const store = useRadioStore.getState();
+    if (!store.streaming) return;
+    const offsetPx = e.clientX - rect.left - rect.width / 2;
+    store.setFrequency(store.frequencyHz + pxToOffsetHz(offsetPx, rect.width));
+  };
+
+  const displayedSpanHz = sampleRateHz / zoom;
 
   return (
     <section className="waterfall">
-      <div className="waterfall-status">
-        {error && <span className="waterfall-error">stream error: {error}</span>}
-        {!error && session === null && (
-          <span className="waterfall-pending">opening stream…</span>
-        )}
-        {!error && session && (
-          <span className="waterfall-ok">
-            fs={(session.sampleRateHz / 1e6).toFixed(3)} MHz · N={session.fftSize}
-          </span>
-        )}
+      <div className="waterfall-header">
+        <div className="waterfall-status">
+          {error && (
+            <span className="waterfall-error">stream error: {error}</span>
+          )}
+          {!error && session === null && (
+            <span className="waterfall-pending">opening stream…</span>
+          )}
+          {!error && session && (
+            <span className="waterfall-ok">
+              fs={(session.sampleRateHz / 1e6).toFixed(3)} MHz · N=
+              {session.fftSize} · span=
+              {(displayedSpanHz / 1e6).toFixed(3)} MHz · zoom=
+              {zoom.toFixed(1)}x
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="spectrum-wrap">
+        <Spectrum ref={spectrumCanvasRef} />
+        <FrequencyAxis />
+        <FilterBandMarker />
       </div>
       <canvas
-        ref={canvasRef}
-        className="waterfall-canvas"
+        ref={waterfallCanvasRef}
+        className={
+          isDragging ? "waterfall-canvas is-dragging" : "waterfall-canvas"
+        }
         width={DEFAULT_FFT_SIZE}
-        height={DISPLAY_HEIGHT}
-        onClick={handleCanvasClick}
+        height={WATERFALL_HEIGHT}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
       />
     </section>
   );
 };
+
+/// Shift the entire canvas content horizontally by `deltaPxCanvas`
+/// (positive = right, negative = left) using an offscreen snapshot
+/// so self-overlap is well-defined. Exposed strip is filled with
+/// the waterfall background color.
+function shiftCanvasContent(
+  canvas: HTMLCanvasElement,
+  deltaPxCanvas: number,
+): void {
+  const ctx = canvas.getContext("2d", { alpha: false });
+  if (!ctx) return;
+  const snapshot = document.createElement("canvas");
+  snapshot.width = canvas.width;
+  snapshot.height = canvas.height;
+  const sctx = snapshot.getContext("2d");
+  if (!sctx) return;
+  sctx.drawImage(canvas, 0, 0);
+  ctx.fillStyle = WATERFALL_BG;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(snapshot, deltaPxCanvas, 0);
+}
+
+/// Scroll the waterfall down by one row and paint the new top row.
+function drawWaterfallRow(
+  canvas: HTMLCanvasElement | null,
+  frame: Float32Array,
+  rowImageRef: React.MutableRefObject<ImageData | null>,
+  lut: Uint8ClampedArray,
+): void {
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d", { alpha: false });
+  if (!ctx) return;
+
+  if (canvas.width !== frame.length) {
+    canvas.width = frame.length;
+  }
+  if (canvas.height !== WATERFALL_HEIGHT) {
+    canvas.height = WATERFALL_HEIGHT;
+  }
+
+  if (
+    rowImageRef.current === null ||
+    rowImageRef.current.width !== frame.length
+  ) {
+    rowImageRef.current = ctx.createImageData(frame.length, 1);
+  }
+
+  const row = rowImageRef.current;
+  const pixels = row.data;
+  const span = DB_PEAK - DB_FLOOR;
+  const lutEntries = lut.length / 3;
+  for (let i = 0; i < frame.length; i += 1) {
+    const normalized = Math.max(
+      0,
+      Math.min(1, (frame[i] - DB_FLOOR) / span),
+    );
+    const lutIdx = (normalized * (lutEntries - 1)) | 0;
+    const offset = lutIdx * 3;
+    const out = i * 4;
+    pixels[out] = lut[offset];
+    pixels[out + 1] = lut[offset + 1];
+    pixels[out + 2] = lut[offset + 2];
+    pixels[out + 3] = 255;
+  }
+
+  ctx.drawImage(
+    canvas,
+    0,
+    0,
+    canvas.width,
+    canvas.height - 1,
+    0,
+    1,
+    canvas.width,
+    canvas.height - 1,
+  );
+  ctx.putImageData(row, 0, 0);
+}
+
+/// Draw a dB-scaled magnitude curve (filled under the line) on the
+/// spectrum canvas. Uses the same `[DB_FLOOR, DB_PEAK]` range as the
+/// waterfall colormap so the two views read consistently.
+function drawSpectrum(
+  canvas: HTMLCanvasElement | null,
+  frame: Float32Array,
+): void {
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d", { alpha: true });
+  if (!ctx) return;
+
+  if (canvas.width !== frame.length) {
+    canvas.width = frame.length;
+  }
+  if (canvas.height !== SPECTRUM_HEIGHT) {
+    canvas.height = SPECTRUM_HEIGHT;
+  }
+
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  const span = DB_PEAK - DB_FLOOR;
+  const toY = (db: number): number => {
+    const n = Math.max(0, Math.min(1, (db - DB_FLOOR) / span));
+    return h - n * h;
+  };
+
+  // Filled area under the curve.
+  const gradient = ctx.createLinearGradient(0, 0, 0, h);
+  gradient.addColorStop(0, "rgba(58, 160, 255, 0.55)");
+  gradient.addColorStop(1, "rgba(58, 160, 255, 0.04)");
+  ctx.fillStyle = gradient;
+  ctx.beginPath();
+  ctx.moveTo(0, h);
+  for (let i = 0; i < frame.length; i += 1) {
+    ctx.lineTo(i, toY(frame[i]));
+  }
+  ctx.lineTo(w, h);
+  ctx.closePath();
+  ctx.fill();
+
+  // Curve on top.
+  ctx.strokeStyle = "rgba(156, 205, 255, 0.9)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let i = 0; i < frame.length; i += 1) {
+    const y = toY(frame[i]);
+    if (i === 0) ctx.moveTo(i, y);
+    else ctx.lineTo(i, y);
+  }
+  ctx.stroke();
+}
 
 export default Waterfall;

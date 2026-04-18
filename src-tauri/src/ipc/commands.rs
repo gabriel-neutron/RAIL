@@ -22,7 +22,7 @@ use crate::hardware::stream::{
     IqCanceler, IqStream, DEFAULT_USB_BUF_LEN, DEFAULT_USB_BUF_NUM, IQ_CHANNEL_CAPACITY,
 };
 use crate::hardware::{self, DeviceInfo, RtlSdrDevice, TunerHandle};
-use crate::ipc::events::DeviceStatus;
+use crate::ipc::events::{DeviceStatus, SignalLevel};
 
 /// FFT size (bins). Matches `docs/DSP.md` §2 default.
 const FFT_SIZE: usize = 2048;
@@ -33,6 +33,15 @@ const DEFAULT_SAMPLE_RATE_HZ: u32 = 2_048_000;
 /// Minimum interval between waterfall frames emitted to the frontend
 /// (~25 fps cap, `docs/DSP.md` §3).
 const MIN_EMIT_INTERVAL: Duration = Duration::from_millis(40);
+
+/// Minimum interval between `signal-level` JSON events (~25 Hz).
+/// Same cadence as waterfall frames — keeps meter and spectrum in step.
+const MIN_LEVEL_EMIT_INTERVAL: Duration = Duration::from_millis(40);
+
+/// Decay per emission for the backend peak-hold used by the signal
+/// meter. 1 dB/frame at ~25 Hz gives a ~4 s fall from a peak to the
+/// noise floor, which reads naturally in the UI.
+const PEAK_DECAY_DB_PER_EMIT: f32 = 1.0;
 
 /// Target audio chunk length emitted to the frontend (~40 ms @ 44.1 kHz).
 /// The resampler output is variable, so this is a *minimum* drain size.
@@ -180,6 +189,7 @@ pub async fn start_stream<R: Runtime>(
     let canceler = stream.canceler();
 
     let dsp_handle = spawn_dsp_task(
+        app.clone(),
         iq_rx,
         waterfall_channel,
         audio_channel,
@@ -498,7 +508,8 @@ fn session_poisoned<T>(_: std::sync::PoisonError<T>) -> RailError {
 /// `fs/4` shift once, then fans out to the waterfall FFT and to the
 /// demod chain. Control messages from `set_mode`/`set_bandwidth`/
 /// `set_squelch` are drained at the top of every iteration.
-fn spawn_dsp_task(
+fn spawn_dsp_task<R: Runtime>(
+    app: AppHandle<R>,
     iq_rx: mpsc::Receiver<Vec<u8>>,
     waterfall_channel: Channel<InvokeResponseBody>,
     audio_channel: Channel<InvokeResponseBody>,
@@ -509,7 +520,7 @@ fn spawn_dsp_task(
     tokio::task::spawn_blocking(move || {
         // FFT + demod work is CPU-bound, so living on the blocking
         // pool avoids starving other async tasks.
-        let mut ctx = DspTaskCtx::new(sample_rate_hz);
+        let mut ctx = DspTaskCtx::<R>::new(app, sample_rate_hz);
         ctx.run(
             iq_rx,
             waterfall_channel,
@@ -523,7 +534,8 @@ fn spawn_dsp_task(
 /// Internal holder for the DSP worker's mutable state. Keeps the
 /// `spawn_dsp_task` closure trivial and lets us unit-test helpers
 /// independently if we ever need to.
-struct DspTaskCtx {
+struct DspTaskCtx<R: Runtime> {
+    app: AppHandle<R>,
     builder: FrameBuilder,
     chain: DemodChain,
     /// IQ samples converted to complex, already `fs/4`-shifted.
@@ -534,11 +546,16 @@ struct DspTaskCtx {
     audio_pending: Vec<f32>,
     phase_idx: u32,
     last_emit: Instant,
+    /// Backend peak-hold for the signal meter. Decays each time
+    /// we emit a `signal-level` event (see `PEAK_DECAY_DB_PER_EMIT`).
+    peak_dbfs: f32,
+    last_level_emit: Instant,
 }
 
-impl DspTaskCtx {
-    fn new(sample_rate_hz: f32) -> Self {
+impl<R: Runtime> DspTaskCtx<R> {
+    fn new(app: AppHandle<R>, sample_rate_hz: f32) -> Self {
         Self {
+            app,
             builder: FrameBuilder::new(FFT_SIZE),
             chain: DemodChain::new(sample_rate_hz),
             shifted: Vec::with_capacity(DEFAULT_USB_BUF_LEN as usize / 2),
@@ -546,6 +563,8 @@ impl DspTaskCtx {
             audio_pending: Vec::with_capacity(AUDIO_CHUNK_SAMPLES * 2),
             phase_idx: 0,
             last_emit: Instant::now() - MIN_EMIT_INTERVAL,
+            peak_dbfs: f32::NEG_INFINITY,
+            last_level_emit: Instant::now() - MIN_LEVEL_EMIT_INTERVAL,
         }
     }
 
@@ -584,13 +603,37 @@ impl DspTaskCtx {
 
             // Fan out branch 2: demod → audio (always ships whatever
             // the chain produced this iteration).
-            self.chain.process(&self.shifted, &mut self.audio_pending);
+            let rms_dbfs = self.chain.process(&self.shifted, &mut self.audio_pending);
             if !self.emit_audio_chunks(&audio_channel, &canceler) {
                 return;
             }
+
+            // Fan out branch 3: signal-level JSON event (rate-limited
+            // to ~25 Hz, with a simple decaying peak-hold).
+            self.emit_signal_level(rms_dbfs);
         }
 
         log::debug!("dsp task exiting: iq sender dropped");
+    }
+
+    /// Push a `signal-level` event if enough time has elapsed, folding
+    /// the new `rms_dbfs` reading into a decaying peak-hold.
+    fn emit_signal_level(&mut self, rms_dbfs: f32) {
+        if self.last_level_emit.elapsed() < MIN_LEVEL_EMIT_INTERVAL {
+            return;
+        }
+        // Non-finite (NEG_INFINITY on silence) collapses to the floor
+        // so the frontend doesn't have to special-case it.
+        let current = if rms_dbfs.is_finite() { rms_dbfs } else { -120.0 };
+        self.peak_dbfs = if self.peak_dbfs.is_finite() {
+            (self.peak_dbfs - PEAK_DECAY_DB_PER_EMIT).max(current)
+        } else {
+            current
+        };
+        if let Err(e) = SignalLevel::new(current, self.peak_dbfs).emit(&self.app) {
+            log::warn!("signal-level emit failed: {e}");
+        }
+        self.last_level_emit = Instant::now();
     }
 
     /// Append the shifted IQ to the FFT pending buffer and emit as

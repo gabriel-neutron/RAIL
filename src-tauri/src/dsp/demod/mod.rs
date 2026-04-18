@@ -336,4 +336,35 @@ mod tests {
             .fold(0.0_f32, |a, &b| a.max(b.abs()));
         assert!(tail_peak > 0.05, "AM envelope silent: peak = {tail_peak}");
     }
+
+    #[test]
+    fn chain_rms_dbfs_is_monotonic_in_amplitude() {
+        // Returned `rms_dbfs` feeds the signal meter. Doubling the IQ
+        // amplitude must increase the reading by ~6 dB.
+        let fs = 2_048_000.0_f32;
+        let make_chain = || DemodChain::new(fs);
+        let n = 8_192;
+
+        let weak: Vec<Complex<f32>> = (0..n)
+            .map(|k| {
+                let phase = 2.0 * PI * 10_000.0 * k as f32 / fs;
+                Complex::new(0.1 * phase.cos(), 0.1 * phase.sin())
+            })
+            .collect();
+        let strong: Vec<Complex<f32>> = weak.iter().map(|c| c * 2.0).collect();
+
+        let mut chain_weak = make_chain();
+        let mut chain_strong = make_chain();
+        let mut drain = Vec::new();
+        let rms_weak = chain_weak.process(&weak, &mut drain);
+        drain.clear();
+        let rms_strong = chain_strong.process(&strong, &mut drain);
+
+        assert!(rms_weak.is_finite() && rms_strong.is_finite());
+        let delta = rms_strong - rms_weak;
+        assert!(
+            (delta - 6.0).abs() < 0.5,
+            "expected ~6 dB jump, got {delta} (weak={rms_weak}, strong={rms_strong})"
+        );
+    }
 }

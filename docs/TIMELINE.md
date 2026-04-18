@@ -83,15 +83,15 @@
 
 **Goal**: professional-looking UI with signal strength display.
 
-- [ ] Signal meter: current dBm + peak hold (see DSP.md §2)
-- [ ] Waterfall zoom (adjust displayed frequency span)
-- [ ] Spectrum view above waterfall (magnitude curve)
-- [ ] Filter width visualization on waterfall (shaded region)
-- [ ] UI layout finalized: controls panel, waterfall pane, meter
-- [ ] Dark theme (SDR tools are always dark)
-- [ ] Responsive layout (minimum 1280px width target)
-- [ ] Device status indicator (connected / disconnected)
-- [ ] Error handling: device disconnect handled gracefully
+- [X] Signal meter: current dBm + peak hold (see DSP.md §2)
+- [X] Waterfall zoom (adjust displayed frequency span)
+- [X] Spectrum view above waterfall (magnitude curve)
+- [X] Filter width visualization on waterfall (shaded region)
+- [X] UI layout finalized: controls panel, waterfall pane, meter
+- [X] Dark theme (SDR tools are always dark)
+- [X] Responsive layout (minimum 1280px width target)
+- [X] Device status indicator (connected / disconnected)
+- [X] Error handling: device disconnect handled gracefully
 
 **Exit criterion**: app looks like a real tool. Screenshot-worthy.
 

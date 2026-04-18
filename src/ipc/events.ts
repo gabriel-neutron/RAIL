@@ -6,6 +6,7 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export const EVENT_DEVICE_STATUS = "device-status";
+export const EVENT_SIGNAL_LEVEL = "signal-level";
 
 export type DeviceStatusPayload = {
   connected: boolean;
@@ -16,5 +17,20 @@ export const subscribeDeviceStatus = (
   handler: (payload: DeviceStatusPayload) => void,
 ): Promise<UnlistenFn> =>
   listen<DeviceStatusPayload>(EVENT_DEVICE_STATUS, (evt) =>
+    handler(evt.payload),
+  );
+
+/// Periodic dBFS level + decaying peak-hold. Backend decays peak by
+/// ~1 dB per emission at ~25 Hz (see `MIN_LEVEL_EMIT_INTERVAL` in
+/// `src-tauri/src/ipc/commands.rs`).
+export type SignalLevelPayload = {
+  current: number;
+  peak: number;
+};
+
+export const subscribeSignalLevel = (
+  handler: (payload: SignalLevelPayload) => void,
+): Promise<UnlistenFn> =>
+  listen<SignalLevelPayload>(EVENT_SIGNAL_LEVEL, (evt) =>
     handler(evt.payload),
   );

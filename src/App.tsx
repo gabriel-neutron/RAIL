@@ -6,16 +6,19 @@ import {
   type DeviceInfo,
   type RailError,
 } from "./ipc/commands";
-import { subscribeDeviceStatus } from "./ipc/events";
+import { subscribeDeviceStatus, subscribeSignalLevel } from "./ipc/events";
 import AudioControls from "./components/AudioControls";
 import FilterControl from "./components/FilterControl";
 import FrequencyControl from "./components/FrequencyControl";
 import MenuBar from "./components/MenuBar";
 import ModeSelector from "./components/ModeSelector";
 import PpmControl from "./components/PpmControl";
+import SignalMeter from "./components/SignalMeter";
+import StatusPill from "./components/StatusPill";
 import Waterfall from "./components/Waterfall";
 import useAudio from "./hooks/useAudio";
 import useKeyboardTuning from "./hooks/useKeyboardTuning";
+import { useRadioStore } from "./store/radio";
 import "./App.css";
 
 type DeviceState =
@@ -37,6 +40,19 @@ const isRailError = (value: unknown): value is RailError => {
 /// start_stream reply reports this rate verbatim; keeping a constant
 /// lets the AudioContext initialize before the first reply arrives.
 const AUDIO_SAMPLE_RATE_HZ = 44_100;
+
+const deviceLabel = (d: DeviceState): string => {
+  switch (d.status) {
+    case "idle":
+      return "idle";
+    case "checking":
+      return "checking…";
+    case "found":
+      return `${d.device.name} (#${d.device.index})`;
+    case "missing":
+      return d.message;
+  }
+};
 
 function App() {
   const [pingResult, setPingResult] = useState<string>("…");
@@ -122,6 +138,7 @@ function App() {
       stopStream().catch((err) => {
         console.warn("[RAIL] stopStream after disconnect failed:", err);
       });
+      useRadioStore.getState().setSignalLevel(null);
       setDevice({
         status: "missing",
         message: payload.error ?? "RTL-SDR disconnected",
@@ -140,6 +157,38 @@ function App() {
     };
   }, []);
 
+  // Signal-level events feed the store (which the SignalMeter reads).
+  // Reset the level whenever streaming stops so the meter doesn't keep
+  // showing stale peaks from the last session.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+
+    void subscribeSignalLevel((payload) => {
+      useRadioStore.getState().setSignalLevel({
+        currentDbfs: payload.current,
+        peakDbfs: payload.peak,
+      });
+    }).then((fn) => {
+      if (cancelled) {
+        fn();
+      } else {
+        unlisten = fn;
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!streamEnabled) {
+      useRadioStore.getState().setSignalLevel(null);
+    }
+  }, [streamEnabled]);
+
   // Any click in the app satisfies the browser's "user gesture before
   // audio playback" requirement. We call `resume` even if the context
   // isn't suspended — it's a no-op in that case.
@@ -156,30 +205,13 @@ function App() {
           <span>
             IPC <code>{pingResult}</code>
           </span>
-          <span>
-            RTL-SDR{" "}
-            {device.status === "idle" && <code>idle</code>}
-            {device.status === "checking" && <code>checking…</code>}
-            {device.status === "found" && (
-              <code>
-                {device.device.name} (#{device.device.index})
-              </code>
-            )}
-            {device.status === "missing" && (
-              <>
-                <code>{device.message}</code>
-                <button
-                  type="button"
-                  className="device-refresh"
-                  onClick={() => {
-                    void refreshDevice();
-                  }}
-                >
-                  Refresh
-                </button>
-              </>
-            )}
-          </span>
+          <StatusPill
+            status={device.status}
+            label={deviceLabel(device)}
+            onRefresh={() => {
+              void refreshDevice();
+            }}
+          />
         </div>
       </header>
       <section className="control-panel">
@@ -193,7 +225,10 @@ function App() {
           <PpmControl />
         </div>
       </section>
-      <Waterfall enabled={streamEnabled} onAudio={handleAudio} />
+      <div className="app-body">
+        <Waterfall enabled={streamEnabled} onAudio={handleAudio} />
+        <SignalMeter />
+      </div>
     </main>
   );
 }
