@@ -43,7 +43,10 @@ pub fn iq_u8_to_complex(raw: &[u8], out: &mut [Complex<f32>]) -> Result<(), Rail
 ///
 /// This is a trivial `fs/4` downconversion — no trig, just sign/swap
 /// cycling through `[1, -j, -1, +j]`.
-fn apply_fs4_shift(samples: &mut [Complex<f32>], phase_idx: u32) -> u32 {
+///
+/// Exposed `pub` so the DSP task can shift once per IQ chunk and fan
+/// the result out to both the FFT frame builder and the demod chain.
+pub fn apply_fs4_shift(samples: &mut [Complex<f32>], phase_idx: u32) -> u32 {
     let mut k = (phase_idx & 0b11) as usize;
     for s in samples.iter_mut() {
         let re = s.re;
@@ -104,6 +107,20 @@ impl FrameBuilder {
             self.phase_idx = apply_fs4_shift(&mut self.iq, self.phase_idx);
         }
         Ok(self.fft.process(&self.iq))
+    }
+
+    /// Run only the FFT stage on IQ samples that were already converted
+    /// and (if needed) `fs/4`-shifted upstream. Lets the DSP task share
+    /// one shifted buffer between the waterfall and demod chains.
+    pub fn process_shifted(&mut self, iq: &[Complex<f32>]) -> Result<&[f32], RailError> {
+        if iq.len() != self.iq.len() {
+            return Err(RailError::DspError(format!(
+                "FFT input length mismatch: {} vs {}",
+                iq.len(),
+                self.iq.len()
+            )));
+        }
+        Ok(self.fft.process(iq))
     }
 }
 

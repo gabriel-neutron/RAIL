@@ -1,19 +1,22 @@
 //! Tauri command handlers (React → Rust).
 //!
-//! Streaming data flows back to the frontend through a per-session
-//! `Channel<InvokeResponseBody>` that the frontend passes to
-//! [`start_stream`]. See `docs/ARCHITECTURE.md` §3.
+//! Streaming data flows back to the frontend through two per-session
+//! `Channel<InvokeResponseBody>`s that the frontend passes to
+//! [`start_stream`]: one for waterfall frames, one for f32 PCM audio.
+//! See `docs/ARCHITECTURE.md` §3 and `docs/DSP.md` §4–5.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use bytemuck::cast_slice;
+use num_complex::Complex;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Runtime, State};
 use tokio::sync::mpsc;
 
 use crate::bookmarks::{Bookmark, BookmarksStore};
-use crate::dsp::waterfall::FrameBuilder;
+use crate::dsp::demod::{DemodChain, DemodControl, DemodMode, AUDIO_RATE_HZ};
+use crate::dsp::waterfall::{apply_fs4_shift, iq_u8_to_complex, FrameBuilder};
 use crate::error::RailError;
 use crate::hardware::stream::{
     IqCanceler, IqStream, DEFAULT_USB_BUF_LEN, DEFAULT_USB_BUF_NUM, IQ_CHANNEL_CAPACITY,
@@ -27,9 +30,28 @@ const FFT_SIZE: usize = 2048;
 /// Default RTL-SDR sample rate. Stable per `docs/HARDWARE.md` §4.
 const DEFAULT_SAMPLE_RATE_HZ: u32 = 2_048_000;
 
-/// Minimum interval between frames emitted to the frontend (~25 fps cap,
-/// `docs/DSP.md` §3).
+/// Minimum interval between waterfall frames emitted to the frontend
+/// (~25 fps cap, `docs/DSP.md` §3).
 const MIN_EMIT_INTERVAL: Duration = Duration::from_millis(40);
+
+/// Target audio chunk length emitted to the frontend (~40 ms @ 44.1 kHz).
+/// The resampler output is variable, so this is a *minimum* drain size.
+const AUDIO_CHUNK_SAMPLES: usize = 1764;
+
+/// Mode names accepted over the wire. Kept in sync with
+/// `src/store/radio.ts :: DemodMode`.
+fn parse_mode(s: &str) -> Result<DemodMode, RailError> {
+    match s {
+        "FM" => Ok(DemodMode::Fm),
+        "AM" => Ok(DemodMode::Am),
+        "USB" | "LSB" | "CW" => Err(RailError::InvalidParameter(format!(
+            "{s} demodulator is stubbed for V1.1 (see docs/DSP.md §6)"
+        ))),
+        other => Err(RailError::InvalidParameter(format!(
+            "unknown mode: {other}"
+        ))),
+    }
+}
 
 /// One running streaming session. Held inside [`AppState`].
 struct Session {
@@ -45,11 +67,13 @@ struct Session {
     gains: Vec<i32>,
     /// Current sample rate; needed to compute the LO offset on `retune`.
     sample_rate_hz: u32,
+    /// Outbound channel for runtime demod control (mode/bandwidth/squelch).
+    control_tx: mpsc::UnboundedSender<DemodControl>,
 }
 
 /// LO offset used to push the RTL-SDR DC spike off the center bin.
 /// See `docs/DSP.md` §1 and the `fs/4` mixer in
-/// [`crate::dsp::waterfall::FrameBuilder`].
+/// [`crate::dsp::waterfall::apply_fs4_shift`].
 fn lo_offset_hz(sample_rate_hz: u32) -> u32 {
     sample_rate_hz / 4
 }
@@ -74,8 +98,7 @@ pub fn check_device() -> Result<DeviceInfo, RailError> {
     hardware::check_device()
 }
 
-/// Parameters for [`start_stream`]. Kept as a struct so adding fields in
-/// Phase 2 doesn't change the command signature.
+/// Parameters for [`start_stream`].
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartStreamArgs {
@@ -84,8 +107,8 @@ pub struct StartStreamArgs {
     pub sample_rate_hz: Option<u32>,
 }
 
-/// Reply for [`start_stream`]. Tells the frontend what FFT size to expect
-/// on the channel and which gain steps are available.
+/// Reply for [`start_stream`]. Tells the frontend what FFT size to
+/// expect on the waterfall channel and how to interpret the audio one.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartStreamReply {
@@ -93,10 +116,14 @@ pub struct StartStreamReply {
     pub sample_rate_hz: u32,
     pub frequency_hz: u32,
     pub available_gains_tenths_db: Vec<i32>,
+    pub audio_sample_rate_hz: u32,
+    pub audio_chunk_samples: usize,
 }
 
-/// Open the first RTL-SDR, configure it, and start the IQ → FFT → channel
-/// pipeline. Returns metadata the UI needs to render the waterfall.
+/// Open the first RTL-SDR, configure it, and start the IQ → FFT/demod
+/// pipeline. The frontend passes two `Channel<ArrayBuffer>` handles:
+/// the first carries waterfall frames (float32), the second carries
+/// mono f32 PCM audio at `audio_sample_rate_hz`.
 ///
 /// The mutex guard is held across the whole body so two concurrent
 /// `start_stream` invocations can't both pass the "slot is empty" check.
@@ -105,7 +132,8 @@ pub struct StartStreamReply {
 pub async fn start_stream<R: Runtime>(
     app: AppHandle<R>,
     args: StartStreamArgs,
-    channel: Channel<InvokeResponseBody>,
+    waterfall_channel: Channel<InvokeResponseBody>,
+    audio_channel: Channel<InvokeResponseBody>,
     state: State<'_, AppState>,
 ) -> Result<StartStreamReply, RailError> {
     let mut guard = state.session.lock().map_err(session_poisoned)?;
@@ -131,6 +159,7 @@ pub async fn start_stream<R: Runtime>(
     let actual_freq = device.center_freq().saturating_sub(offset);
 
     let (iq_tx, iq_rx) = mpsc::channel::<Vec<u8>>(IQ_CHANNEL_CAPACITY);
+    let (control_tx, control_rx) = mpsc::unbounded_channel::<DemodControl>();
 
     // Fires from the reader thread if the dongle is unplugged mid-stream.
     // Emits a `device-status` event so the UI can switch back to the
@@ -150,7 +179,14 @@ pub async fn start_stream<R: Runtime>(
     )?;
     let canceler = stream.canceler();
 
-    let dsp_handle = spawn_dsp_task(iq_rx, channel, canceler);
+    let dsp_handle = spawn_dsp_task(
+        iq_rx,
+        waterfall_channel,
+        audio_channel,
+        control_rx,
+        canceler,
+        sample_rate as f32,
+    );
 
     *guard = Some(Session {
         stream: Some(stream),
@@ -158,6 +194,7 @@ pub async fn start_stream<R: Runtime>(
         tuner: Some(tuner),
         gains: gains.clone(),
         sample_rate_hz: sample_rate,
+        control_tx,
     });
     drop(guard);
 
@@ -168,6 +205,8 @@ pub async fn start_stream<R: Runtime>(
         sample_rate_hz: sample_rate,
         frequency_hz: actual_freq,
         available_gains_tenths_db: gains,
+        audio_sample_rate_hz: AUDIO_RATE_HZ as u32,
+        audio_chunk_samples: AUDIO_CHUNK_SAMPLES,
     })
 }
 
@@ -309,6 +348,85 @@ pub fn set_ppm(args: SetPpmArgs, state: State<'_, AppState>) -> Result<(), RailE
     tuner.set_freq_correction_ppm(args.ppm)
 }
 
+/// Arguments for [`set_mode`].
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetModeArgs {
+    pub mode: String,
+}
+
+/// Switch the active demodulator. Only FM/AM are wired for Phase 3;
+/// USB/LSB/CW return [`RailError::InvalidParameter`].
+#[tauri::command]
+pub fn set_mode(args: SetModeArgs, state: State<'_, AppState>) -> Result<(), RailError> {
+    let mode = parse_mode(&args.mode)?;
+    send_control(&state, DemodControl::SetMode(mode))
+}
+
+/// Arguments for [`set_bandwidth`].
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetBandwidthArgs {
+    pub bandwidth_hz: u32,
+}
+
+/// Set the channel-filter bandwidth in Hz.
+///
+/// Also implicitly selects WBFM vs NBFM when mode == FM — bandwidths
+/// ≥ 100 kHz activate de-emphasis and 75 kHz max deviation.
+#[tauri::command]
+pub fn set_bandwidth(
+    args: SetBandwidthArgs,
+    state: State<'_, AppState>,
+) -> Result<(), RailError> {
+    if args.bandwidth_hz < 1_000 {
+        return Err(RailError::InvalidParameter(
+            "bandwidth must be >= 1 kHz".into(),
+        ));
+    }
+    send_control(
+        &state,
+        DemodControl::SetBandwidthHz(args.bandwidth_hz as f32),
+    )
+}
+
+/// Arguments for [`set_squelch`].
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetSquelchArgs {
+    /// `None` or non-finite disables squelch. Otherwise a dBFS
+    /// threshold — audio is gated to zero below this level.
+    pub threshold_dbfs: Option<f32>,
+}
+
+/// Set the channel-power squelch threshold in dBFS. `None` or `NaN`
+/// disables the gate.
+#[tauri::command]
+pub fn set_squelch(
+    args: SetSquelchArgs,
+    state: State<'_, AppState>,
+) -> Result<(), RailError> {
+    let db = args
+        .threshold_dbfs
+        .filter(|v| v.is_finite())
+        .unwrap_or(f32::NEG_INFINITY);
+    send_control(&state, DemodControl::SetSquelchDbfs(db))
+}
+
+fn send_control(
+    state: &State<'_, AppState>,
+    msg: DemodControl,
+) -> Result<(), RailError> {
+    let guard = state.session.lock().map_err(session_poisoned)?;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| RailError::InvalidParameter("stream not running".into()))?;
+    session
+        .control_tx
+        .send(msg)
+        .map_err(|e| RailError::StreamError(format!("demod control channel closed: {e}")))
+}
+
 /// Arguments for [`add_bookmark`].
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -376,63 +494,165 @@ fn session_poisoned<T>(_: std::sync::PoisonError<T>) -> RailError {
     RailError::StreamError("session lock poisoned".into())
 }
 
+/// Spawn the shared DSP worker: converts IQ bytes once, applies the
+/// `fs/4` shift once, then fans out to the waterfall FFT and to the
+/// demod chain. Control messages from `set_mode`/`set_bandwidth`/
+/// `set_squelch` are drained at the top of every iteration.
 fn spawn_dsp_task(
-    mut iq_rx: mpsc::Receiver<Vec<u8>>,
-    channel: Channel<InvokeResponseBody>,
+    iq_rx: mpsc::Receiver<Vec<u8>>,
+    waterfall_channel: Channel<InvokeResponseBody>,
+    audio_channel: Channel<InvokeResponseBody>,
+    control_rx: mpsc::UnboundedReceiver<DemodControl>,
     canceler: IqCanceler,
+    sample_rate_hz: f32,
 ) -> tokio::task::JoinHandle<()> {
     tokio::task::spawn_blocking(move || {
-        // FFT + colormap work is CPU-bound, so living on the blocking
-        // pool avoids starving other async tasks. `blocking_recv`
-        // cooperates with a std thread.
-        let mut builder = FrameBuilder::new(FFT_SIZE);
-        let frame_bytes = builder.bytes_per_frame();
-        let mut pending: Vec<u8> = Vec::with_capacity(frame_bytes * 2);
-        let mut frame_scratch: Vec<u8> = vec![0u8; frame_bytes];
-        let mut last_emit = Instant::now() - MIN_EMIT_INTERVAL;
+        // FFT + demod work is CPU-bound, so living on the blocking
+        // pool avoids starving other async tasks.
+        let mut ctx = DspTaskCtx::new(sample_rate_hz);
+        ctx.run(
+            iq_rx,
+            waterfall_channel,
+            audio_channel,
+            control_rx,
+            canceler,
+        );
+    })
+}
 
-        while let Some(mut chunk) = iq_rx.blocking_recv() {
-            if pending.is_empty() {
-                pending = std::mem::take(&mut chunk);
-            } else {
-                pending.append(&mut chunk);
+/// Internal holder for the DSP worker's mutable state. Keeps the
+/// `spawn_dsp_task` closure trivial and lets us unit-test helpers
+/// independently if we ever need to.
+struct DspTaskCtx {
+    builder: FrameBuilder,
+    chain: DemodChain,
+    /// IQ samples converted to complex, already `fs/4`-shifted.
+    shifted: Vec<Complex<f32>>,
+    /// Samples awaiting enough length for a full FFT frame.
+    fft_pending: Vec<Complex<f32>>,
+    /// Resampled audio awaiting enough length to ship a chunk.
+    audio_pending: Vec<f32>,
+    phase_idx: u32,
+    last_emit: Instant,
+}
+
+impl DspTaskCtx {
+    fn new(sample_rate_hz: f32) -> Self {
+        Self {
+            builder: FrameBuilder::new(FFT_SIZE),
+            chain: DemodChain::new(sample_rate_hz),
+            shifted: Vec::with_capacity(DEFAULT_USB_BUF_LEN as usize / 2),
+            fft_pending: Vec::with_capacity(FFT_SIZE * 2),
+            audio_pending: Vec::with_capacity(AUDIO_CHUNK_SAMPLES * 2),
+            phase_idx: 0,
+            last_emit: Instant::now() - MIN_EMIT_INTERVAL,
+        }
+    }
+
+    fn run(
+        &mut self,
+        mut iq_rx: mpsc::Receiver<Vec<u8>>,
+        waterfall_channel: Channel<InvokeResponseBody>,
+        audio_channel: Channel<InvokeResponseBody>,
+        mut control_rx: mpsc::UnboundedReceiver<DemodControl>,
+        canceler: IqCanceler,
+    ) {
+        while let Some(chunk) = iq_rx.blocking_recv() {
+            // Apply any pending control changes atomically before
+            // consuming the next chunk.
+            while let Ok(msg) = control_rx.try_recv() {
+                self.chain.apply(msg);
             }
 
-            while pending.len() >= frame_bytes {
-                frame_scratch.copy_from_slice(&pending[..frame_bytes]);
-                pending.drain(..frame_bytes);
+            if chunk.len() % 2 != 0 {
+                log::warn!("discarding odd-length IQ chunk: {} bytes", chunk.len());
+                continue;
+            }
 
-                // 25 fps emission cap — still consume the frame to keep
-                // the IQ pipeline draining (DSP.md §3).
-                if last_emit.elapsed() < MIN_EMIT_INTERVAL {
-                    continue;
-                }
+            let n_complex = chunk.len() / 2;
+            self.shifted.resize(n_complex, Complex::new(0.0, 0.0));
+            if let Err(e) = iq_u8_to_complex(&chunk, &mut self.shifted) {
+                log::warn!("IQ conversion failed: {e}");
+                continue;
+            }
+            self.phase_idx = apply_fs4_shift(&mut self.shifted, self.phase_idx);
 
-                match builder.build(&frame_scratch) {
-                    Ok(spectrum) => {
-                        let bytes: &[u8] = cast_slice(spectrum);
-                        if let Err(e) = channel.send(InvokeResponseBody::Raw(bytes.to_vec())) {
-                            // Frontend dropped the channel without calling
-                            // stop_stream; tell the reader to shut down so
-                            // we don't leak the USB transfer thread.
-                            log::warn!("waterfall channel send failed: {e}; cancelling reader");
-                            canceler.cancel();
-                            return;
-                        }
-                        last_emit = Instant::now();
-                    }
-                    Err(e) => {
-                        log::warn!("frame build failed: {e}");
-                    }
-                }
+            // Fan out branch 1: waterfall FFT (rate-limited).
+            if !self.emit_waterfall_frames(&waterfall_channel, &canceler) {
+                return;
+            }
+
+            // Fan out branch 2: demod → audio (always ships whatever
+            // the chain produced this iteration).
+            self.chain.process(&self.shifted, &mut self.audio_pending);
+            if !self.emit_audio_chunks(&audio_channel, &canceler) {
+                return;
             }
         }
 
         log::debug!("dsp task exiting: iq sender dropped");
-    })
+    }
+
+    /// Append the shifted IQ to the FFT pending buffer and emit as
+    /// many FFT frames as we have (capped to `MIN_EMIT_INTERVAL`).
+    /// Returns `false` if the waterfall channel is closed.
+    fn emit_waterfall_frames(
+        &mut self,
+        channel: &Channel<InvokeResponseBody>,
+        canceler: &IqCanceler,
+    ) -> bool {
+        self.fft_pending.extend_from_slice(&self.shifted);
+
+        while self.fft_pending.len() >= FFT_SIZE {
+            // Always drain the frame even when the emission is
+            // rate-limited, so the pending buffer doesn't grow
+            // unbounded (docs/DSP.md §3).
+            let drop_frame = self.last_emit.elapsed() < MIN_EMIT_INTERVAL;
+            let frame: Vec<Complex<f32>> = self.fft_pending.drain(..FFT_SIZE).collect();
+
+            if drop_frame {
+                continue;
+            }
+
+            match self.builder.process_shifted(&frame) {
+                Ok(spectrum) => {
+                    let bytes: &[u8] = cast_slice(spectrum);
+                    if let Err(e) = channel.send(InvokeResponseBody::Raw(bytes.to_vec())) {
+                        log::warn!("waterfall channel send failed: {e}; cancelling reader");
+                        canceler.cancel();
+                        return false;
+                    }
+                    self.last_emit = Instant::now();
+                }
+                Err(e) => {
+                    log::warn!("frame build failed: {e}");
+                }
+            }
+        }
+        true
+    }
+
+    /// Ship accumulated audio in `AUDIO_CHUNK_SAMPLES`-sized bursts.
+    /// Returns `false` if the audio channel is closed.
+    fn emit_audio_chunks(
+        &mut self,
+        channel: &Channel<InvokeResponseBody>,
+        canceler: &IqCanceler,
+    ) -> bool {
+        while self.audio_pending.len() >= AUDIO_CHUNK_SAMPLES {
+            let tail: Vec<f32> = self.audio_pending.drain(..AUDIO_CHUNK_SAMPLES).collect();
+            let bytes: &[u8] = cast_slice(&tail);
+            if let Err(e) = channel.send(InvokeResponseBody::Raw(bytes.to_vec())) {
+                log::warn!("audio channel send failed: {e}; cancelling reader");
+                canceler.cancel();
+                return false;
+            }
+        }
+        true
+    }
 }
 
-/// Register the AppState and all Phase 1 commands on a Tauri builder.
+/// Register the AppState and all commands on a Tauri builder.
 pub fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
         .manage(AppState::default())
@@ -446,6 +666,9 @@ pub fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder
             available_gains,
             retune,
             set_ppm,
+            set_mode,
+            set_bandwidth,
+            set_squelch,
             list_bookmarks,
             add_bookmark,
             remove_bookmark,

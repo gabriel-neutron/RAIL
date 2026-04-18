@@ -64,16 +64,16 @@
 
 **Goal**: user can listen to FM and AM signals.
 
-- [ ] FM demodulation implemented in Rust (see DSP.md §4)
-- [ ] AM demodulation implemented in Rust (see DSP.md §5)
-- [ ] Decimation chain to 44100 Hz audio (see DSP.md §4)
-- [ ] De-emphasis filter for WBFM (see DSP.md §4)
-- [ ] PCM audio streamed via binary Tauri event
-- [ ] Web Audio API playback in React (AudioContext)
-- [ ] Mode selector buttons: FM / AM (USB/LSB stubbed for V1.1)
-- [ ] Volume slider and mute toggle
-- [ ] Filter bandwidth control (affects demodulation bandwidth)
-- [ ] Squelch control (silence below threshold dBm)
+- [x] FM demodulation implemented in Rust (see DSP.md §4)
+- [x] AM demodulation implemented in Rust (see DSP.md §5)
+- [x] Decimation chain to 44100 Hz audio (see DSP.md §4)
+- [x] De-emphasis filter for WBFM (see DSP.md §4)
+- [x] PCM audio streamed via binary Tauri event
+- [x] Web Audio API playback in React (AudioContext)
+- [x] Mode selector buttons: FM / AM (USB/LSB stubbed for V1.1)
+- [x] Volume slider and mute toggle
+- [x] Filter bandwidth control (affects demodulation bandwidth)
+- [x] Squelch control (silence below threshold dBm)
 
 **Exit criterion**: tune to 87.5–108 MHz FM station, hear music clearly.
 

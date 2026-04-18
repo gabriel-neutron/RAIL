@@ -23,6 +23,8 @@ export type StartStreamReply = {
   sampleRateHz: number;
   frequencyHz: number;
   availableGainsTenthsDb: number[];
+  audioSampleRateHz: number;
+  audioChunkSamples: number;
 };
 
 export type StartStreamArgs = {
@@ -42,9 +44,14 @@ export const checkDevice = (): Promise<DeviceInfo> =>
 
 export const startStream = (
   args: StartStreamArgs,
-  channel: Channel<ArrayBuffer>,
+  waterfallChannel: Channel<ArrayBuffer>,
+  audioChannel: Channel<ArrayBuffer>,
 ): Promise<StartStreamReply> =>
-  invoke<StartStreamReply>("start_stream", { args, channel });
+  invoke<StartStreamReply>("start_stream", {
+    args,
+    waterfallChannel,
+    audioChannel,
+  });
 
 export const stopStream = (): Promise<void> => invoke<void>("stop_stream");
 
@@ -63,6 +70,18 @@ export const retune = (frequencyHz: number): Promise<RetuneReply> =>
 
 export const setPpm = (ppm: number): Promise<void> =>
   invoke<void>("set_ppm", { args: { ppm } });
+
+export type DemodModeWire = "FM" | "AM" | "USB" | "LSB" | "CW";
+
+export const setMode = (mode: DemodModeWire): Promise<void> =>
+  invoke<void>("set_mode", { args: { mode } });
+
+export const setBandwidth = (bandwidthHz: number): Promise<void> =>
+  invoke<void>("set_bandwidth", { args: { bandwidthHz } });
+
+/// `null` disables the gate.
+export const setSquelch = (thresholdDbfs: number | null): Promise<void> =>
+  invoke<void>("set_squelch", { args: { thresholdDbfs } });
 
 export type Bookmark = {
   id: string;

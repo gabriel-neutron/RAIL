@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   checkDevice,
   ping,
@@ -7,11 +7,14 @@ import {
   type RailError,
 } from "./ipc/commands";
 import { subscribeDeviceStatus } from "./ipc/events";
+import AudioControls from "./components/AudioControls";
+import FilterControl from "./components/FilterControl";
 import FrequencyControl from "./components/FrequencyControl";
-import GainControl from "./components/GainControl";
 import MenuBar from "./components/MenuBar";
+import ModeSelector from "./components/ModeSelector";
 import PpmControl from "./components/PpmControl";
 import Waterfall from "./components/Waterfall";
+import useAudio from "./hooks/useAudio";
 import useKeyboardTuning from "./hooks/useKeyboardTuning";
 import "./App.css";
 
@@ -30,12 +33,30 @@ const isRailError = (value: unknown): value is RailError => {
   );
 };
 
+/// Matches `AUDIO_RATE_HZ` in `src-tauri/src/dsp/demod/mod.rs`. The
+/// start_stream reply reports this rate verbatim; keeping a constant
+/// lets the AudioContext initialize before the first reply arrives.
+const AUDIO_SAMPLE_RATE_HZ = 44_100;
+
 function App() {
   const [pingResult, setPingResult] = useState<string>("…");
   const [device, setDevice] = useState<DeviceState>({ status: "idle" });
   const streamEnabled = device.status === "found";
 
   useKeyboardTuning();
+
+  const { enqueue, resume } = useAudio({
+    enabled: streamEnabled,
+    sampleRateHz: AUDIO_SAMPLE_RATE_HZ,
+  });
+  const enqueueRef = useRef(enqueue);
+  useEffect(() => {
+    enqueueRef.current = enqueue;
+  }, [enqueue]);
+  const handleAudio = useMemo(
+    () => (frame: Float32Array) => enqueueRef.current(frame),
+    [],
+  );
 
   const refreshDevice = useCallback(async () => {
     setDevice({ status: "checking" });
@@ -119,8 +140,15 @@ function App() {
     };
   }, []);
 
+  // Any click in the app satisfies the browser's "user gesture before
+  // audio playback" requirement. We call `resume` even if the context
+  // isn't suspended — it's a no-op in that case.
+  const handlePointerDown = useCallback(() => {
+    void resume();
+  }, [resume]);
+
   return (
-    <main className="app">
+    <main className="app" onPointerDown={handlePointerDown}>
       <MenuBar />
       <header className="app-header">
         <h1>RAIL</h1>
@@ -157,11 +185,15 @@ function App() {
       <section className="control-panel">
         <FrequencyControl />
         <div className="control-panel-row">
-          <GainControl />
+          <ModeSelector />
+          <FilterControl />
+        </div>
+        <div className="control-panel-row">
+          <AudioControls />
           <PpmControl />
         </div>
       </section>
-      <Waterfall enabled={streamEnabled} />
+      <Waterfall enabled={streamEnabled} onAudio={handleAudio} />
     </main>
   );
 }

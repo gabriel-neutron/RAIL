@@ -1,13 +1,16 @@
-// Waterfall lifecycle hook: opens a binary `Channel<ArrayBuffer>`, asks
-// Rust to start streaming at the store's current frequency, drives a rAF
-// drain of the latest frame into the supplied callback, and tears
-// everything down on unmount.
+// Waterfall + audio session lifecycle hook.
+//
+// Opens a pair of binary `Channel<ArrayBuffer>`s (one for spectrum
+// frames, one for f32 PCM audio), calls `start_stream` at the store's
+// current frequency, drives a rAF drain of the latest waterfall frame
+// into `onFrame`, forwards audio frames to `onAudio` synchronously,
+// and tears everything down on unmount.
 //
 // Frequency changes after startup go through the store's debounced
 // `retune` path (`store/radio.ts`), not through a restart. The effect
 // deps here are `[enabled]` only — tuning never tears the stream down.
 //
-// See docs/ARCHITECTURE.md §3 and docs/DSP.md §3.
+// See docs/ARCHITECTURE.md §3 and docs/DSP.md §3–4.
 
 import { Channel } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
@@ -25,6 +28,7 @@ export type WaterfallSession = StartStreamReply;
 export type UseWaterfallOptions = {
   enabled?: boolean;
   onFrame: (frame: Float32Array) => void;
+  onAudio?: (frame: Float32Array) => void;
 };
 
 export type UseWaterfallState = {
@@ -51,14 +55,20 @@ const formatError = (err: unknown): string => {
 export const useWaterfall = ({
   enabled = true,
   onFrame,
+  onAudio,
 }: UseWaterfallOptions): UseWaterfallState => {
   const [session, setSession] = useState<WaterfallSession | null>(null);
   const [error, setError] = useState<string | null>(null);
   const onFrameRef = useRef(onFrame);
+  const onAudioRef = useRef(onAudio);
 
   useEffect(() => {
     onFrameRef.current = onFrame;
   }, [onFrame]);
+
+  useEffect(() => {
+    onAudioRef.current = onAudio;
+  }, [onAudio]);
 
   useEffect(() => {
     if (!enabled) {
@@ -69,9 +79,17 @@ export const useWaterfall = ({
     let rafId: number | null = null;
     let latest: Float32Array | null = null;
 
-    const channel = new Channel<ArrayBuffer>();
-    channel.onmessage = (buffer) => {
+    const waterfallChannel = new Channel<ArrayBuffer>();
+    waterfallChannel.onmessage = (buffer) => {
       latest = new Float32Array(buffer);
+    };
+
+    const audioChannel = new Channel<ArrayBuffer>();
+    audioChannel.onmessage = (buffer) => {
+      // Audio is time-critical: deliver every chunk synchronously
+      // instead of batching by rAF. Drops here would cause clicks.
+      const handler = onAudioRef.current;
+      if (handler) handler(new Float32Array(buffer));
     };
 
     const drain = () => {
@@ -94,7 +112,11 @@ export const useWaterfall = ({
       await stopStream().catch(() => undefined);
       if (cancelled) return;
       try {
-        const reply = await startStream({ frequencyHz: initialFrequencyHz }, channel);
+        const reply = await startStream(
+          { frequencyHz: initialFrequencyHz },
+          waterfallChannel,
+          audioChannel,
+        );
         if (cancelled) {
           await stopStream().catch(() => undefined);
           return;

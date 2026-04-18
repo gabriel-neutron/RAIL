@@ -11,15 +11,17 @@ const DB_PEAK = -20;
 
 type WaterfallProps = {
   enabled?: boolean;
+  onAudio?: (frame: Float32Array) => void;
 };
 
-export const Waterfall = ({ enabled = true }: WaterfallProps) => {
+export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rowImageRef = useRef<ImageData | null>(null);
   const lut = useMemo(() => buildColormapLut(256), []);
 
   const { session, error } = useWaterfall({
     enabled,
+    onAudio,
     onFrame: (frame) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
