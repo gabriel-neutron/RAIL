@@ -30,7 +30,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            librtlsdr-dev librtlsdr0 \
+            librtlsdr-dev \
             libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
             libssl-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev \
             build-essential pkg-config
@@ -74,8 +74,9 @@ jobs:
           releaseBody: |
             See `CHANGELOG` and `README.md` for release notes and installation instructions.
 
-            Installers below are produced by `tauri-action`. Linux users
-            may need to install `librtlsdr0` separately; Windows users
+            Installers below are produced by `tauri-action`. On Linux,
+            install your distro's RTL-SDR library if the app fails to start
+            (package name varies, e.g. `librtlsdr2` on recent Ubuntu). Windows users
             must install the WinUSB driver via Zadig before first run
             (see `docs/HARDWARE.md` §6).
           releaseDraft: true

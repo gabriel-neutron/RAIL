@@ -102,12 +102,11 @@ No component kits (MUI, Chakra, Ant) — RAIL has a custom UI.
 
 ### Linux (Debian / Ubuntu)
 ```bash
-sudo apt install librtlsdr-dev librtlsdr0 \
+sudo apt install librtlsdr-dev \
                  libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
-                 libssl-dev libgtk-3-dev libsoup-3.0-dev \
+                 libssl-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev \
                  build-essential curl wget pkg-config
-# Non-root USB access: see the udev rules block in the root README.
-```
+`librtlsdr-dev` pulls in the correct runtime package for your release (e.g. `librtlsdr2` on Ubuntu 24.04; older releases used `librtlsdr0`). Non-root USB access: see `docs/HARDWARE.md` or your distro’s rtl-sdr docs.
 
 ### macOS
 ```bash
