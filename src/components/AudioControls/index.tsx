@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 
 import { setGain } from "../../ipc/commands";
 import { useRadioStore } from "../../store/radio";
+import { useReplayStore } from "../../store/replay";
 import HoverSlider from "./HoverSlider";
 
 const SQUELCH_MIN_DBFS = -100;
@@ -128,6 +129,7 @@ export const AudioControls = () => {
   const autoGain = useRadioStore((s) => s.autoGain);
   const gainTenths = useRadioStore((s) => s.gainTenthsDb);
   const gains = useRadioStore((s) => s.availableGainsTenthsDb);
+  const replayActive = useReplayStore((s) => s.active);
 
   const setVolume = useRadioStore((s) => s.setVolume);
   const setMuted = useRadioStore((s) => s.setMuted);
@@ -193,13 +195,14 @@ export const AudioControls = () => {
       : "—";
 
   const pushGainToHardware = (next: Parameters<typeof setGain>[0]) => {
-    if (!streaming) return;
+    if (!streaming || replayActive) return;
     setGain(next).catch((err) => {
       console.warn("[RAIL] set_gain failed:", err);
     });
   };
 
   const toggleAutoGain = () => {
+    if (replayActive) return;
     const next = !autoGain;
     setAutoGain(next);
     pushGainToHardware(
@@ -208,7 +211,7 @@ export const AudioControls = () => {
   };
 
   const handleGainChange = (idx: number) => {
-    if (gains.length === 0) return;
+    if (replayActive || gains.length === 0) return;
     const clamped = Math.max(0, Math.min(gains.length - 1, idx));
     const tenths = gains[clamped];
     setGainTenthsStore(tenths);
@@ -235,7 +238,13 @@ export const AudioControls = () => {
       <HoverSlider
         icon={<GainIcon auto={autoGain} />}
         iconLabel={autoGain ? "Switch to manual gain" : "Switch to auto gain"}
-        iconTooltip={autoGain ? "Gain · auto (click to set manually)" : "Gain"}
+        iconTooltip={
+          replayActive
+            ? "Gain · disabled during replay"
+            : autoGain
+              ? "Gain · auto (click to set manually)"
+              : "Gain"
+        }
         onIconClick={toggleAutoGain}
         ariaLabel="Gain"
         value={gainIdx}
@@ -243,8 +252,9 @@ export const AudioControls = () => {
         max={Math.max(0, gains.length - 1)}
         step={1}
         onChange={handleGainChange}
-        valueLabel={gainLabel}
+        valueLabel={replayActive ? "—" : gainLabel}
         collapsed={autoGain || gains.length === 0}
+        disabled={replayActive}
       />
       <HoverSlider
         icon={<SquelchIcon enabled={squelchEnabled} />}

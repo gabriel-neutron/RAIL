@@ -106,3 +106,117 @@ export const replaceBookmarks = (
   bookmarks: Bookmark[],
 ): Promise<Bookmark[]> =>
   invoke<Bookmark[]>("replace_bookmarks", { args: { bookmarks } });
+
+/* -------- Capture (screenshot / audio / IQ) -------- */
+
+export type StartAudioCaptureReply = {
+  tempPath: string;
+  suggestedName: string;
+};
+
+export const startAudioCapture = (): Promise<StartAudioCaptureReply> =>
+  invoke<StartAudioCaptureReply>("start_audio_capture");
+
+export type StopAudioCaptureReply = {
+  tempPath: string;
+  suggestedName: string;
+  frequencyHz: number;
+  mode: string;
+  durationMs: number;
+};
+
+export const stopAudioCapture = (): Promise<StopAudioCaptureReply> =>
+  invoke<StopAudioCaptureReply>("stop_audio_capture");
+
+export type StartIqCaptureReply = {
+  tempMetaPath: string;
+  tempDataPath: string;
+  suggestedName: string;
+};
+
+export const startIqCapture = (): Promise<StartIqCaptureReply> =>
+  invoke<StartIqCaptureReply>("start_iq_capture");
+
+export type StopIqCaptureReply = {
+  tempMetaPath: string;
+  tempDataPath: string;
+  suggestedName: string;
+  frequencyHz: number;
+  durationMs: number;
+};
+
+export const stopIqCapture = (): Promise<StopIqCaptureReply> =>
+  invoke<StopIqCaptureReply>("stop_iq_capture");
+
+export const finalizeCapture = (src: string, dst: string): Promise<void> =>
+  invoke<void>("finalize_capture", { args: { src, dst } });
+
+export const finalizeIqCapture = (
+  srcMeta: string,
+  srcData: string,
+  dstMeta: string,
+  dstData: string,
+): Promise<void> =>
+  invoke<void>("finalize_iq_capture", {
+    args: { srcMeta, srcData, dstMeta, dstData },
+  });
+
+export const discardCapture = (paths: string[]): Promise<void> =>
+  invoke<void>("discard_capture", { args: { paths } });
+
+export const screenshotSuggestion = (): Promise<{ suggestedName: string }> =>
+  invoke<{ suggestedName: string }>("screenshot_suggestion");
+
+export const saveScreenshot = (
+  dst: string,
+  pngBytes: Uint8Array,
+): Promise<void> =>
+  invoke<void>("save_screenshot", {
+    args: { dst, pngBytes: Array.from(pngBytes) },
+  });
+
+/* -------- Replay (IQ file playback) -------- */
+
+export type ReplayInfoReply = {
+  dataPath: string;
+  metaPath: string;
+  sampleRateHz: number;
+  centerFrequencyHz: number;
+  demodMode: string;
+  filterBandwidthHz: number;
+  totalSamples: number;
+  durationMs: number;
+  datetimeIso8601: string;
+};
+
+export type StartReplayReply = {
+  fftSize: number;
+  sampleRateHz: number;
+  frequencyHz: number;
+  audioSampleRateHz: number;
+  audioChunkSamples: number;
+  info: ReplayInfoReply;
+};
+
+export const openReplay = (dataPath: string): Promise<ReplayInfoReply> =>
+  invoke<ReplayInfoReply>("open_replay", { args: { dataPath } });
+
+export const startReplay = (
+  dataPath: string,
+  waterfallChannel: Channel<ArrayBuffer>,
+  audioChannel: Channel<ArrayBuffer>,
+): Promise<StartReplayReply> =>
+  invoke<StartReplayReply>("start_replay", {
+    args: { dataPath },
+    waterfallChannel,
+    audioChannel,
+  });
+
+export const pauseReplay = (): Promise<void> => invoke<void>("pause_replay");
+
+export const resumeReplay = (): Promise<void> => invoke<void>("resume_replay");
+
+export const seekReplay = (positionMs: number): Promise<void> =>
+  invoke<void>("seek_replay", { args: { positionMs } });
+
+export const stopReplay = (): Promise<void> => invoke<void>("stop_replay");

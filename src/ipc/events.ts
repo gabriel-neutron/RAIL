@@ -7,6 +7,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export const EVENT_DEVICE_STATUS = "device-status";
 export const EVENT_SIGNAL_LEVEL = "signal-level";
+export const EVENT_REPLAY_POSITION = "replay-position";
 
 export type DeviceStatusPayload = {
   connected: boolean;
@@ -32,5 +33,21 @@ export const subscribeSignalLevel = (
   handler: (payload: SignalLevelPayload) => void,
 ): Promise<UnlistenFn> =>
   listen<SignalLevelPayload>(EVENT_SIGNAL_LEVEL, (evt) =>
+    handler(evt.payload),
+  );
+
+/// IQ-replay transport position. Backend emits at ~25 Hz from the
+/// replay reader thread (see `src-tauri/src/replay.rs`).
+export type ReplayPositionPayload = {
+  sampleIdx: number;
+  positionMs: number;
+  totalMs: number;
+  playing: boolean;
+};
+
+export const subscribeReplayPosition = (
+  handler: (payload: ReplayPositionPayload) => void,
+): Promise<UnlistenFn> =>
+  listen<ReplayPositionPayload>(EVENT_REPLAY_POSITION, (evt) =>
     handler(evt.payload),
   );

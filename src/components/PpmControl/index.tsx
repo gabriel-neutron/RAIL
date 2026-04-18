@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { setPpm as setPpmCommand } from "../../ipc/commands";
 import { useRadioStore } from "../../store/radio";
+import { useReplayStore } from "../../store/replay";
 
 const MIN_PPM = -200;
 const MAX_PPM = 200;
@@ -12,6 +13,7 @@ export const PpmControl = () => {
   const streaming = useRadioStore((s) => s.streaming);
   const ppm = useRadioStore((s) => s.ppm);
   const setPpm = useRadioStore((s) => s.setPpm);
+  const replayActive = useReplayStore((s) => s.active);
 
   const [draft, setDraft] = useState<string>(String(ppm));
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +31,7 @@ export const PpmControl = () => {
     const next = clamp(parsed);
     setPpm(next);
     setDraft(String(next));
-    if (!streaming) return;
+    if (!streaming || replayActive) return;
     try {
       await setPpmCommand(next);
       setError(null);
@@ -46,7 +48,8 @@ export const PpmControl = () => {
         type="text"
         inputMode="numeric"
         value={draft}
-        disabled={!streaming}
+        disabled={!streaming || replayActive}
+        title={replayActive ? "PPM is fixed by the replayed file" : undefined}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={(e) => {
           void apply(e.target.value);

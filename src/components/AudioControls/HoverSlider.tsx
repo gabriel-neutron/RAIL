@@ -36,6 +36,11 @@ export type HoverSliderProps = {
   /// When true the track stays hidden even on hover and the value
   /// label renders at reduced opacity. Use for muted/disabled states.
   collapsed?: boolean;
+  /// When true the icon button is disabled, the track cannot open and
+  /// the value label renders at reduced opacity. Use when the slider
+  /// represents a hardware control that doesn't apply (e.g. gain
+  /// during IQ replay).
+  disabled?: boolean;
   trackWidthPx?: number;
 };
 
@@ -52,6 +57,7 @@ export const HoverSlider = ({
   ariaLabel,
   valueLabel,
   collapsed = false,
+  disabled = false,
   trackWidthPx = 64,
 }: HoverSliderProps) => {
   const [hovered, setHovered] = useState(false);
@@ -137,18 +143,20 @@ export const HoverSlider = ({
     }
   };
 
-  const show = (hovered || dragging) && !collapsed;
+  const show = (hovered || dragging) && !collapsed && !disabled;
 
   return (
     <div
       className="hover-slider"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      aria-disabled={disabled || undefined}
     >
       <button
         type="button"
         className="hover-slider-btn"
         onClick={onIconClick}
+        disabled={disabled}
         aria-label={iconLabel}
         title={iconTooltip ?? iconLabel}
       >
@@ -187,7 +195,7 @@ export const HoverSlider = ({
       </div>
       <span
         className="hover-slider-value"
-        style={{ opacity: collapsed ? 0.5 : 1 }}
+        style={{ opacity: disabled || collapsed ? 0.5 : 1 }}
       >
         {valueLabel}
       </span>

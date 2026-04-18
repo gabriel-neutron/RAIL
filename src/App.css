@@ -352,6 +352,14 @@ html,
   z-index: 20;
 }
 
+/* Left-anchor variant: dropdowns attached to menus on the left edge of
+   the menu bar would be clipped off-screen with the default right
+   anchor. */
+.menu-dropdown-left {
+  left: 0;
+  right: auto;
+}
+
 .menu-item {
   background: transparent;
   color: #d7dde3;
@@ -364,9 +372,14 @@ html,
   border-radius: 3px;
 }
 
-.menu-item:hover {
+.menu-item:hover:not(:disabled) {
   background-color: #1a2a3a;
   color: #3aa0ff;
+}
+
+.menu-item:disabled {
+  color: #4a525c;
+  cursor: not-allowed;
 }
 
 /* -------- Bookmark list inside the menu dropdown -------- */
@@ -880,4 +893,82 @@ html,
   min-height: 200px;
   border: 1px dashed #1a1f26;
   border-radius: 6px;
+}
+
+/* -------- MenuBar capture REC dot -------- */
+
+.menu-rec-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background-color: #ff5470;
+  box-shadow: 0 0 6px rgba(255, 84, 112, 0.7);
+  animation: menu-rec-blink 1.2s ease-in-out infinite;
+  vertical-align: middle;
+}
+
+@keyframes menu-rec-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* -------- Transport bar (IQ replay) -------- */
+
+.transport-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  margin-top: 8px;
+  background-color: #0f141a;
+  border: 1px solid #1d2630;
+  border-radius: 6px;
+}
+
+.transport-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  color: #d7dde3;
+  background-color: #162029;
+  border: 1px solid #25313d;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.transport-btn:hover {
+  background-color: #1c2835;
+}
+
+.transport-btn.transport-close {
+  margin-left: auto;
+}
+
+.transport-slider {
+  flex: 1;
+  min-width: 0;
+  accent-color: #3aa0ff;
+}
+
+.transport-time {
+  font-family: "JetBrains Mono", "Consolas", ui-monospace, monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: #9cbbd8;
+  min-width: 84px;
+  text-align: center;
+}
+
+.transport-meta {
+  font-family: "JetBrains Mono", "Consolas", ui-monospace, monospace;
+  font-size: 12px;
+  color: #7b8b9c;
+  white-space: nowrap;
 }

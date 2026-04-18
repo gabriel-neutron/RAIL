@@ -14,6 +14,7 @@ use std::thread::{self, JoinHandle};
 
 use tokio::sync::mpsc;
 
+use crate::dsp::input::DspInput;
 use crate::error::RailError;
 use crate::hardware::{ffi, RtlSdrDevice};
 
@@ -36,7 +37,7 @@ pub const STARTUP_SKIP_BUFFERS: usize = 2;
 /// State shared with the C callback. Kept on the reader thread's stack,
 /// so its lifetime always exceeds any callback invocation.
 struct CbCtx {
-    tx: mpsc::Sender<Vec<u8>>,
+    tx: mpsc::Sender<DspInput>,
     skip_remaining: AtomicUsize,
     dropped: AtomicU64,
 }
@@ -66,7 +67,7 @@ extern "C" fn on_iq(buf: *mut u8, len: u32, ctx: *mut c_void) {
         let slice = unsafe { std::slice::from_raw_parts(buf, len as usize) };
         let owned = slice.to_vec();
 
-        if ctx_ref.tx.try_send(owned).is_err() {
+        if ctx_ref.tx.try_send(DspInput::RtlU8(owned)).is_err() {
             let dropped = ctx_ref.dropped.fetch_add(1, Ordering::Relaxed) + 1;
             if dropped.is_power_of_two() {
                 log::warn!("IQ buffer full, dropped {dropped} frames so far");
@@ -145,7 +146,7 @@ impl IqStream {
     /// — the caller uses it to notify the frontend.
     pub fn start(
         device: RtlSdrDevice,
-        tx: mpsc::Sender<Vec<u8>>,
+        tx: mpsc::Sender<DspInput>,
         buf_num: u32,
         buf_len: u32,
         on_disconnect: OnDisconnect,

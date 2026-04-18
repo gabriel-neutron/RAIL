@@ -6,7 +6,11 @@ import {
   type DeviceInfo,
   type RailError,
 } from "./ipc/commands";
-import { subscribeDeviceStatus, subscribeSignalLevel } from "./ipc/events";
+import {
+  subscribeDeviceStatus,
+  subscribeReplayPosition,
+  subscribeSignalLevel,
+} from "./ipc/events";
 import AudioControls from "./components/AudioControls";
 import FilterControl from "./components/FilterControl";
 import FrequencyControl from "./components/FrequencyControl";
@@ -15,10 +19,12 @@ import ModeSelector from "./components/ModeSelector";
 import PpmControl from "./components/PpmControl";
 import SignalMeter from "./components/SignalMeter";
 import StatusPill from "./components/StatusPill";
+import Transport from "./components/Transport";
 import Waterfall from "./components/Waterfall";
 import useAudio from "./hooks/useAudio";
 import useKeyboardTuning from "./hooks/useKeyboardTuning";
 import { useRadioStore } from "./store/radio";
+import { useReplayStore } from "./store/replay";
 import "./App.css";
 
 type DeviceState =
@@ -57,7 +63,8 @@ const deviceLabel = (d: DeviceState): string => {
 function App() {
   const [pingResult, setPingResult] = useState<string>("…");
   const [device, setDevice] = useState<DeviceState>({ status: "idle" });
-  const streamEnabled = device.status === "found";
+  const replayActive = useReplayStore((s) => s.active);
+  const streamEnabled = device.status === "found" || replayActive;
 
   useKeyboardTuning();
 
@@ -189,6 +196,29 @@ function App() {
     }
   }, [streamEnabled]);
 
+  // Replay transport position from the reader thread.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+
+    void subscribeReplayPosition((payload) => {
+      useReplayStore
+        .getState()
+        .applyPosition(payload.positionMs, payload.playing);
+    }).then((fn) => {
+      if (cancelled) {
+        fn();
+      } else {
+        unlisten = fn;
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
   // Any click in the app satisfies the browser's "user gesture before
   // audio playback" requirement. We call `resume` even if the context
   // isn't suspended — it's a no-op in that case.
@@ -229,6 +259,7 @@ function App() {
         <Waterfall enabled={streamEnabled} onAudio={handleAudio} />
         <SignalMeter />
       </div>
+      <Transport />
     </main>
   );
 }

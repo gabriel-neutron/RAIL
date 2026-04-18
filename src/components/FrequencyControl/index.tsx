@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { UNIT_SCALE, useRadioStore, type FreqUnit } from "../../store/radio";
+import { useReplayStore } from "../../store/replay";
 
 const UNITS: FreqUnit[] = ["Hz", "kHz", "MHz"];
 
@@ -27,6 +28,7 @@ export const FrequencyControl = () => {
   const setFrequency = useRadioStore((s) => s.setFrequency);
   const unit = useRadioStore((s) => s.freqUnit);
   const setUnit = useRadioStore((s) => s.setFreqUnit);
+  const replayActive = useReplayStore((s) => s.active);
 
   const [draft, setDraft] = useState<string>(() =>
     formatUnitValue(frequencyHz, unit),
@@ -72,7 +74,11 @@ export const FrequencyControl = () => {
   };
 
   return (
-    <section className="frequency-control">
+    <section
+      className="frequency-control"
+      aria-disabled={replayActive || undefined}
+      title={replayActive ? "Frequency is fixed by the replayed file" : undefined}
+    >
       <span className="frequency-control-label">Center</span>
       <div className="frequency-control-row">
         <span className="frequency-control-value">{canonical}</span>
@@ -96,6 +102,7 @@ export const FrequencyControl = () => {
         type="text"
         inputMode="decimal"
         value={draft}
+        disabled={replayActive}
         onChange={(e) => setDraft(e.target.value)}
         onFocus={() => setFocused(true)}
         onBlur={(e) => {
@@ -111,6 +118,7 @@ export const FrequencyControl = () => {
             key={m}
             type="button"
             className="step-btn"
+            disabled={replayActive}
             onClick={() => bump(m)}
           >
             {formatStepLabel(m)}

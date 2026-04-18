@@ -5,4 +5,5 @@
 pub mod demod;
 pub mod fft;
 pub mod filter;
+pub mod input;
 pub mod waterfall;

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useWaterfall } from "../../hooks/useWaterfall";
+import { useCaptureStore } from "../../store/capture";
 import { useRadioStore } from "../../store/radio";
+import { useReplayStore } from "../../store/replay";
 import FilterBandMarker from "../FilterBandMarker";
 import FrequencyAxis from "../FrequencyAxis";
 import Spectrum from "../Spectrum";
@@ -43,6 +45,11 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
 
   const zoom = useRadioStore((s) => s.zoom);
   const sampleRateHz = useRadioStore((s) => s.sampleRateHz);
+  /// Bumped by the replay store on open / seek / loop. While replaying
+  /// an IQ file we want the waterfall's Y-axis to track file time, not
+  /// wall-clock emit order — clearing the canvas on each discontinuity
+  /// makes the painted region grow from the seek point forward.
+  const waterfallEpoch = useReplayStore((s) => s.waterfallEpoch);
 
   const zoomRef = useRef(zoom);
   useEffect(() => {
@@ -95,7 +102,26 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
     // Reset the row buffer so the new frame length is used on the
     // next draw (zoom change shrinks/grows the frame).
     rowImageRef.current = null;
-  }, [session?.fftSize, zoom]);
+  }, [session?.fftSize, zoom, waterfallEpoch]);
+
+  // Register a PNG screenshot source with the capture store so the
+  // "save screenshot" menu entry can grab the waterfall without
+  // reaching into component refs.
+  useEffect(() => {
+    const provider = () =>
+      new Promise<Blob | null>((resolve) => {
+        const canvas = waterfallCanvasRef.current;
+        if (!canvas) {
+          resolve(null);
+          return;
+        }
+        canvas.toBlob((blob) => resolve(blob), "image/png");
+      });
+    useCaptureStore.getState().setScreenshotProvider(provider);
+    return () => {
+      useCaptureStore.getState().setScreenshotProvider(null);
+    };
+  }, []);
 
   // Pointer lifecycle for pan-to-retune with click-to-tune fallback.
   // Under 4 px of cumulative movement the gesture is treated as a

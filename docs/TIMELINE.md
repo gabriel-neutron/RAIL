@@ -104,11 +104,7 @@
 - [ ] Audio recording (WAV, PCM float32, 44100 Hz)
 - [ ] Waterfall screenshot (PNG)
 - [ ] IQ clip capture (SigMF format — see SIGNALS.md §1)
-- [ ] Session metadata saved (see SIGNALS.md §2)
-- [ ] Capture list view (list sessions, show metadata)
-- [ ] Session notes editor (label, frequency, mode, signal type, free text)
 - [ ] Open/play back audio recording
-- [ ] Export session as ZIP (SigMF + WAV + PNG + JSON)
 
 **Exit criterion**: capture a signal, close app, reopen, find the session, play it back.
 

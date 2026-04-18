@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from "react";
 
 import type { Bookmark } from "../../ipc/commands";
 import { useBookmarksStore } from "../../store/bookmarks";
+import { useCaptureStore } from "../../store/capture";
 import { useRadioStore } from "../../store/radio";
+import { useReplayStore } from "../../store/replay";
 
-type MenuKey = "file" | "settings" | "tools" | "bookmarks";
+type MenuKey = "file" | "settings" | "tools" | "bookmarks" | "capture";
 
 const BOOKMARK_FILE_VERSION = 1;
 const BOOKMARK_EXPORT_NAME = "rail-bookmarks.json";
@@ -50,6 +52,17 @@ export const MenuBar = () => {
 
   const frequencyHz = useRadioStore((s) => s.frequencyHz);
   const setFrequency = useRadioStore((s) => s.setFrequency);
+  const streaming = useRadioStore((s) => s.streaming);
+  const recordingAudio = useCaptureStore((s) => s.recordingAudio);
+  const recordingIq = useCaptureStore((s) => s.recordingIq);
+  const startAudio = useCaptureStore((s) => s.startAudio);
+  const stopAudioWithSave = useCaptureStore((s) => s.stopAudioWithSave);
+  const startIq = useCaptureStore((s) => s.startIq);
+  const stopIqWithSave = useCaptureStore((s) => s.stopIqWithSave);
+  const saveScreenshot = useCaptureStore((s) => s.saveScreenshot);
+  const replayActive = useReplayStore((s) => s.active);
+  const openReplayFile = useReplayStore((s) => s.openFile);
+  const closeReplay = useReplayStore((s) => s.close);
   const items = useBookmarksStore((s) => s.items);
   const error = useBookmarksStore((s) => s.error);
   const add = useBookmarksStore((s) => s.add);
@@ -187,9 +200,44 @@ export const MenuBar = () => {
 
   return (
     <nav className="menu-bar" ref={wrapRef} aria-label="Application menu">
-      <button type="button" className="menu-top" disabled aria-disabled="true">
-        File
-      </button>
+      <div className="menu-group">
+        <button
+          type="button"
+          className={open === "file" ? "menu-top menu-top-open" : "menu-top"}
+          aria-haspopup="menu"
+          aria-expanded={open === "file"}
+          onClick={() => toggle("file")}
+        >
+          File
+        </button>
+        {open === "file" && (
+          <div className="menu-dropdown menu-dropdown-left" role="menu">
+            <button
+              type="button"
+              role="menuitem"
+              className="menu-item"
+              onClick={() => {
+                setOpen(null);
+                void openReplayFile();
+              }}
+            >
+              Open IQ file…
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="menu-item"
+              disabled={!replayActive}
+              onClick={() => {
+                setOpen(null);
+                void closeReplay();
+              }}
+            >
+              Close file
+            </button>
+          </div>
+        )}
+      </div>
       <button type="button" className="menu-top" disabled aria-disabled="true">
         Settings
       </button>
@@ -254,11 +302,16 @@ export const MenuBar = () => {
                       type="button"
                       role="menuitem"
                       className="menu-bookmark-tune"
+                      disabled={replayActive}
                       onClick={() => {
                         setFrequency(b.frequencyHz);
                         setOpen(null);
                       }}
-                      title={`Tune to ${formatFrequency(b.frequencyHz)}`}
+                      title={
+                        replayActive
+                          ? "Disabled during replay"
+                          : `Tune to ${formatFrequency(b.frequencyHz)}`
+                      }
                     >
                       <span className="menu-bookmark-name">{b.name}</span>
                       <span className="menu-bookmark-freq">
@@ -282,6 +335,68 @@ export const MenuBar = () => {
               </ul>
             )}
             {error && <div className="menu-error">{error}</div>}
+          </div>
+        )}
+      </div>
+      <div className="menu-group">
+        <button
+          type="button"
+          className={
+            open === "capture" ? "menu-top menu-top-open" : "menu-top"
+          }
+          aria-haspopup="menu"
+          aria-expanded={open === "capture"}
+          onClick={() => toggle("capture")}
+        >
+          Capture
+          {(recordingAudio || recordingIq) && (
+            <span
+              className="menu-rec-dot"
+              aria-label="Recording in progress"
+            />
+          )}
+        </button>
+        {open === "capture" && (
+          <div className="menu-dropdown" role="menu">
+            <button
+              type="button"
+              role="menuitem"
+              className="menu-item"
+              disabled={!streaming}
+              onClick={() => {
+                setOpen(null);
+                void saveScreenshot();
+              }}
+            >
+              Save screenshot…
+            </button>
+            <div className="menu-separator" role="separator" />
+            <button
+              type="button"
+              role="menuitem"
+              className="menu-item"
+              disabled={!streaming && !recordingAudio}
+              onClick={() => {
+                setOpen(null);
+                if (recordingAudio) void stopAudioWithSave();
+                else void startAudio();
+              }}
+            >
+              {recordingAudio ? "Stop audio recording" : "Start audio recording"}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="menu-item"
+              disabled={!streaming && !recordingIq}
+              onClick={() => {
+                setOpen(null);
+                if (recordingIq) void stopIqWithSave();
+                else void startIq();
+              }}
+            >
+              {recordingIq ? "Stop IQ recording" : "Start IQ recording"}
+            </button>
           </div>
         )}
       </div>

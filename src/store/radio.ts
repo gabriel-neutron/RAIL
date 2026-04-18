@@ -7,6 +7,7 @@ import {
   setSquelch as setSquelchCmd,
   type DemodModeWire,
 } from "../ipc/commands";
+import { useReplayStore } from "./replay";
 
 export type DemodMode = "FM" | "AM" | "USB" | "LSB" | "CW";
 
@@ -139,6 +140,10 @@ export const useRadioStore = create<RadioState>((set, get) => ({
   zoom: 1,
   signalLevel: null,
   setFrequency: (frequencyHz) => {
+    // Replay sessions are locked to the capture's center frequency; the
+    // backend would reject any retune with `InvalidParameter` anyway, so
+    // we drop the change at the source to keep the UI honest.
+    if (useReplayStore.getState().active) return;
     // Round to integer Hz — the backend `retune` command deserializes
     // `frequencyHz` as `u32`, so fractional values (e.g. from click-to-tune
     // pixel math) would be silently rejected by serde.

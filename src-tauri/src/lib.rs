@@ -9,12 +9,14 @@ pub mod dsp;
 pub mod error;
 pub mod hardware;
 pub mod ipc;
+pub mod replay;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let _ = env_logger::try_init();
 
-    let builder = ipc::commands::register(tauri::Builder::default());
+    let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
+    let builder = ipc::commands::register(builder);
     builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
