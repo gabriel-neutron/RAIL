@@ -41,8 +41,8 @@ pub fn write_mono_f32<P: AsRef<Path>>(
     }
     let tmp = path.with_extension("wav.tmp");
     {
-        let file = File::create(&tmp)
-            .map_err(|e| RailError::CaptureError(format!("wav create: {e}")))?;
+        let file =
+            File::create(&tmp).map_err(|e| RailError::CaptureError(format!("wav create: {e}")))?;
         let mut w = BufWriter::new(file);
         let header = build_header(samples.len() as u32, sample_rate_hz);
         w.write_all(&header)
@@ -57,8 +57,7 @@ pub fn write_mono_f32<P: AsRef<Path>>(
             .sync_all()
             .map_err(|e| RailError::CaptureError(format!("wav sync: {e}")))?;
     }
-    std::fs::rename(&tmp, path)
-        .map_err(|e| RailError::CaptureError(format!("wav rename: {e}")))
+    std::fs::rename(&tmp, path).map_err(|e| RailError::CaptureError(format!("wav rename: {e}")))
 }
 
 fn build_header(sample_count: u32, sample_rate_hz: u32) -> [u8; 44] {
@@ -239,15 +238,9 @@ mod tests {
         assert_eq!(count, 5);
 
         let mut bytes = Vec::new();
-        File::open(&path)
-            .unwrap()
-            .read_to_end(&mut bytes)
-            .unwrap();
+        File::open(&path).unwrap().read_to_end(&mut bytes).unwrap();
         assert_eq!(bytes.len(), 44 + 5 * 4);
-        assert_eq!(
-            u32::from_le_bytes(bytes[40..44].try_into().unwrap()),
-            5 * 4
-        );
+        assert_eq!(u32::from_le_bytes(bytes[40..44].try_into().unwrap()), 5 * 4);
         assert_eq!(
             u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
             36 + 5 * 4

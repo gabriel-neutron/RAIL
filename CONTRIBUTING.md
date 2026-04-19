@@ -1,6 +1,6 @@
 # Contributing to RAIL
 
-RAIL is a solo educatioal project ( I am educating myslef to SIGINT ), but contributions and bug reports are
+RAIL is a solo educational project ( I am educating myself to SIGINT ), but contributions and bug reports are
 welcome.
 
 ## Ground rules
@@ -30,13 +30,15 @@ The following must all pass locally:
 ```bash
 # Rust
 cd src-tauri
+cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
-cargo test --lib
+cargo test --all-targets --no-fail-fast
 cd ..
 
 # Frontend
 npx tsc --noEmit
 npm run build
+npm audit --omit=dev --audit-level=high
 ```
 
 GitHub Actions runs the same checks on every push and PR — see

@@ -134,7 +134,7 @@ export const useRadioStore = create<RadioState>((set, get) => ({
   ppm: 0,
   freqUnit: "MHz",
   streaming: false,
-  volume: 0.7,
+  volume: 0.1,
   muted: false,
   squelchDbfs: null,
   zoom: 1,

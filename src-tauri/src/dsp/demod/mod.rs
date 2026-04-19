@@ -281,8 +281,8 @@ mod tests {
         // After filter transients settle, the steady-state should
         // sit near 0.5 (pre-deemphasis). De-emphasis attenuates DC
         // only slightly for a steady deviation (tau·fs >> 1).
-        let tail = audio[audio.len() / 2..].iter().sum::<f32>()
-            / (audio.len() - audio.len() / 2) as f32;
+        let tail =
+            audio[audio.len() / 2..].iter().sum::<f32>() / (audio.len() - audio.len() / 2) as f32;
         assert!(
             (tail - 0.5).abs() < 0.1,
             "expected ~0.5 steady-state, got {tail}"

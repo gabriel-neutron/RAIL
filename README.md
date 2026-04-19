@@ -50,6 +50,12 @@ So far I’ve only run this on **Windows** with **my RTL-SDR dongle**. Other set
 
 ---
 
+## Offline demo
+
+No dongle? The repo ships with a short sample IQ capture at [`docs/assets/demo_iq.sigmf-data`](docs/assets/demo_iq.sigmf-data) (plus its `.sigmf-meta` sidecar). Open it from the replay transport — the waterfall, spectrum, and audio paths run end-to-end against the file, so you can exercise every screen without hardware.
+
+---
+
 ## Feedback
 
 **All feedback is welcome** — issues, ideas, “this confused me,” or “have you thought about…”. I’m building in public partly to learn from other people who care about RF, Rust, or UI. Don’t hesitate to reach out.

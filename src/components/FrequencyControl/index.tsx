@@ -81,7 +81,21 @@ export const FrequencyControl = () => {
     >
       <span className="frequency-control-label">Center</span>
       <div className="frequency-control-row">
-        <span className="frequency-control-value">{canonical}</span>
+        <input
+          className="frequency-control-frequency"
+          type="text"
+          inputMode="decimal"
+          value={draft}
+          disabled={replayActive}
+          onChange={(e) => setDraft(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={(e) => {
+            setFocused(false);
+            commitDraft(e.target.value);
+          }}
+          onKeyDown={handleKeyDown}
+          aria-label={`Center frequency in ${unit}`}
+        />
         <div className="frequency-control-units" role="radiogroup" aria-label="Unit">
           {UNITS.map((u) => (
             <button
@@ -97,21 +111,6 @@ export const FrequencyControl = () => {
           ))}
         </div>
       </div>
-      <input
-        className="frequency-control-input"
-        type="text"
-        inputMode="decimal"
-        value={draft}
-        disabled={replayActive}
-        onChange={(e) => setDraft(e.target.value)}
-        onFocus={() => setFocused(true)}
-        onBlur={(e) => {
-          setFocused(false);
-          commitDraft(e.target.value);
-        }}
-        onKeyDown={handleKeyDown}
-        aria-label={`Center frequency in ${unit}`}
-      />
       <div className="frequency-control-steps" aria-label={`Step in ${unit}`}>
         {STEP_MULTIPLIERS.map((m) => (
           <button

@@ -222,9 +222,7 @@ impl IqStream {
             match handle.join() {
                 Ok(res) => res?,
                 Err(_) => {
-                    return Err(RailError::StreamError(
-                        "IQ reader thread panicked".into(),
-                    ));
+                    return Err(RailError::StreamError("IQ reader thread panicked".into()));
                 }
             }
         }

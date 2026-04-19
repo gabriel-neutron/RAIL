@@ -272,9 +272,7 @@ impl RtlSdrDevice {
     ) -> Result<(), RailError> {
         let rc = ffi::rtlsdr_read_async(self.ptr, cb, ctx, buf_num, buf_len);
         if rc != 0 {
-            return Err(RailError::StreamError(format!(
-                "rtlsdr_read_async -> {rc}"
-            )));
+            return Err(RailError::StreamError(format!("rtlsdr_read_async -> {rc}")));
         }
         Ok(())
     }

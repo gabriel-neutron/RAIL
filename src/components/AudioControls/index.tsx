@@ -10,7 +10,7 @@ const SQUELCH_MAX_DBFS = 0;
 const SQUELCH_DEFAULT_DBFS = -60;
 
 /// Volume level in [0..1] we restore to when the user unmutes from zero.
-const UNMUTE_FALLBACK_VOLUME = 0.5;
+const UNMUTE_FALLBACK_VOLUME = 0.1;
 
 const VolumeIcon = ({
   muted,

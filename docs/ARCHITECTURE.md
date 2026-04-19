@@ -12,7 +12,7 @@
 
 ## 1. Overview
 
-RAIL is a **Tauri v2** desktop application.
+RAIL is a **Tauri v2** desktop application. React owns the UI, Rust owns hardware, DSP, and file I/O. The two sides exchange structured requests over Tauri commands and high-rate binary frames over per-session channels.
 
 ```
 ┌─────────────────────────────────┐
@@ -25,6 +25,7 @@ RAIL is a **Tauri v2** desktop application.
 │  ├── hardware/    (RTL-SDR)     │
 │  ├── dsp/         (FFT, demod)  │
 │  ├── capture/     (SigMF I/O)   │
+│  ├── replay.rs    (SigMF play)  │
 │  └── ipc/         (commands)    │
 └────────────┬────────────────────┘
              │ librtlsdr (FFI)
@@ -33,6 +34,10 @@ RAIL is a **Tauri v2** desktop application.
 └─────────────────────────────────┘
 ```
 
+### 1.1 Offline demo
+
+The app ships with a short sample IQ capture at [`docs/assets/demo_iq.sigmf-data`](assets/demo_iq.sigmf-data) (+ its `.sigmf-meta` sidecar). On a host without a dongle, feed that path to the standard replay flow — `open_replay` followed by `start_replay` — and the waterfall, spectrum, and audio paths behave exactly as for a live stream.
+
 ---
 
 ## 2. Module boundaries
@@ -40,186 +45,144 @@ RAIL is a **Tauri v2** desktop application.
 ### Rust — `/src-tauri/src/`
 
 ```
-hardware/
-  mod.rs          ← RTL-SDR open/close/configure
-  stream.rs       ← IQ sample reader, async cancel
-  ffi.rs          ← hand-written librtlsdr bindings
-dsp/
-  mod.rs
-  input.rs        ← u8 → Complex<f32> conversion
-  fft.rs          ← rustfft wrapper + Hann window
-  waterfall.rs    ← magnitude, dB, FFT shift, frame builder
-  filter.rs       ← decimation, de-emphasis, resampling
-  demod/
-    fm.rs         ← FM demodulation (owned)
-    am.rs         ← AM demodulation (owned)
-capture/
-  mod.rs
-  sigmf.rs        ← streaming SigMF IQ writer
-  wav.rs          ← streaming WAV PCM writer
-  tmp.rs          ← temp-file helpers for stage-then-finalize
-replay.rs         ← SigMF playback (open, seek, play)
-bookmarks.rs      ← user frequency bookmarks (JSON store)
-ipc/
-  commands.rs     ← Tauri command handlers
-  events.rs       ← binary event emitters
+hardware/      mod.rs, stream.rs, ffi.rs
+dsp/           input.rs, fft.rs, waterfall.rs, filter.rs, demod/{mod,fm,am}.rs
+capture/       sigmf.rs, wav.rs, tmp.rs
+replay.rs      SigMF playback reader
+bookmarks.rs   versioned JSON store (atomic write)
+ipc/           commands.rs, events.rs
+error.rs       RailError (serde-tagged)
 ```
 
 ### React — `/src/`
 
 ```
-components/
-  Waterfall/          ← canvas rendering, colormap, zoom
-  FrequencyControl/   ← frequency input, step buttons
-  ModeSelector/       ← AM/FM buttons
-  FilterBandMarker/   ← shaded filter width on waterfall
-  SignalMeter/        ← current + peak dBm display
-  AudioControls/      ← volume, mute, squelch
-  Transport/          ← record / IQ clip / screenshot / replay
-  MenuBar/            ← app menus, bookmarks, settings
-  PpmControl/         ← PPM correction input
-store/
-  radio.ts            ← zustand: tuned freq, mode, gain, filter
-  capture.ts          ← zustand: recording state + outputs
-  replay.ts           ← zustand: replay playback state
-hooks/
-  useWaterfall.ts     ← binary event listener → canvas
-  useAudio.ts         ← PCM stream → Web Audio API
-ipc/
-  commands.ts         ← typed wrappers for Tauri commands
-  events.ts           ← typed wrappers for Tauri events
+components/    Waterfall, FrequencyControl, ModeSelector, FilterBandMarker,
+               SignalMeter, AudioControls, Transport, MenuBar, PpmControl
+store/         zustand: radio / capture / replay
+hooks/         useWaterfall, useAudio
+ipc/           commands.ts, events.ts
 ```
 
 ---
 
 ## 3. Tauri IPC contract
 
-### Commands (React → Rust, request/response)
+RAIL uses two distinct IPC surfaces: **named JSON events** (low-rate status and transport updates) and **per-session binary channels** (high-rate waterfall and audio frames). There are no `waterfall-frame` or `audio-chunk` named events — all high-rate traffic is channel-based.
 
-```typescript
-// Tune the radio
-invoke('set_frequency', { frequencyHz: number }): Promise<void>
+### 3.1 Commands (React → Rust, request/response)
 
-// Change demodulation mode
-invoke('set_mode', { mode: 'FM' | 'AM' | 'USB' | 'LSB' | 'CW' }): Promise<void>
+| Command | Wrapper | Purpose |
+| --- | --- | --- |
+| `ping` | `ping()` | Liveness probe |
+| `check_device` | `checkDevice()` | Enumerate the RTL-SDR (index, name) |
+| `start_stream` | `startStream(args, waterfallCh, audioCh)` | Open device, start DSP worker; returns FFT/sample-rate metadata |
+| `stop_stream` | `stopStream()` | Cancel the read thread, join the DSP worker |
+| `set_gain` | `setGain({ auto, tenthsDb? })` | Auto or explicit gain step |
+| `available_gains` | `availableGains()` | Supported gain steps (tenths dB) |
+| `retune` | `retune(frequencyHz)` | Retune the tuner; echoes applied frequency |
+| `set_ppm` | `setPpm(ppm)` | Tuner PPM correction |
+| `set_mode` | `setMode(mode)` | `FM` / `AM` / `USB` / `LSB` / `CW` |
+| `set_bandwidth` | `setBandwidth(bandwidthHz)` | Rebuild the channel filter |
+| `set_squelch` | `setSquelch(thresholdDbfs \| null)` | Audio-gate threshold |
+| Bookmarks | `listBookmarks`, `addBookmark`, `removeBookmark`, `replaceBookmarks` | Versioned JSON store CRUD |
+| Capture | `start/stopAudioCapture`, `start/stopIqCapture`, `finalizeCapture`, `finalizeIqCapture`, `discardCapture` | Stage-then-finalize file I/O |
+| Screenshot | `screenshotSuggestion`, `saveScreenshot` | Suggest filename, atomic PNG write |
+| Replay | `openReplay`, `startReplay`, `pauseReplay`, `resumeReplay`, `seekReplay`, `stopReplay` | Transport for SigMF captures (incl. [`docs/assets/demo_iq.sigmf-data`](assets/demo_iq.sigmf-data)) |
 
-// Set filter bandwidth
-invoke('set_bandwidth', { bandwidthHz: number }): Promise<void>
+### 3.2 Named events (Rust → React, JSON)
 
-// Set gain (dB, 0 = auto)
-invoke('set_gain', { gainDb: number }): Promise<void>
+| Event | Payload | Cadence |
+| --- | --- | --- |
+| `device-status` | `{ connected, error? }` | On connect / disconnect / error |
+| `signal-level` | `{ current, peak }` in dBFS | ≤ 25 Hz, rate-limited with peak decay |
+| `replay-position` | `{ sampleIdx, positionMs, totalMs, playing }` | ~25 Hz while replay is open |
 
-// Start/stop streaming
-invoke('start_stream'): Promise<void>
-invoke('stop_stream'): Promise<void>
+Constants live in [`src-tauri/src/ipc/events.rs`](../src-tauri/src/ipc/events.rs); TS mirrors in [`src/ipc/events.ts`](../src/ipc/events.ts).
 
-// Capture controls
-invoke('start_recording'): Promise<void>
-invoke('stop_recording'): Promise<{ filePath: string }>
-invoke('save_iq_clip', { durationMs: number }): Promise<{ filePath: string }>
-```
+### 3.3 Streaming channels (Rust → React, binary)
 
-### Events (Rust → React, streaming)
+High-rate frames travel on `tauri::ipc::Channel<InvokeResponseBody>` opened by the frontend and passed as command arguments:
 
-```typescript
-// Waterfall frame — binary float32 array of length N (magnitude in dB)
-// Event name: 'waterfall-frame'
-// Payload: ArrayBuffer (float32, N elements)
+- **`waterfallChannel`** (`start_stream`, `start_replay`): `FFT_SIZE × 4 = 8192` bytes of little-endian `f32` magnitude (dB), at ≤ 25 fps.
+- **`audioChannel`** (same): `AUDIO_CHUNK_SAMPLES × 4 ≈ 7 KB` of mono `f32` PCM at 44.1 kHz.
 
-// Audio chunk — binary float32 array (PCM samples, mono, 44100 Hz)
-// Event name: 'audio-chunk'
-// Payload: ArrayBuffer (float32)
-
-// Signal meter update — current and peak dBm
-// Event name: 'signal-level'
-// Payload: { current: number, peak: number }
-
-// Device status
-// Event name: 'device-status'
-// Payload: { connected: boolean, error?: string }
-```
-
-**Binary event format**: Tauri v2 supports raw `Vec<u8>` payloads.
-Cast float32 array as bytes: `bytearray = float32_slice.as_bytes()`.
-Frontend receives as `ArrayBuffer`, wraps with `new Float32Array(buffer)`.
+Rust sends `InvokeResponseBody::Raw(Vec<u8>)`; the frontend receives an `ArrayBuffer` and wraps it with `new Float32Array(buffer)` (see [`src/hooks/useWaterfall.ts`](../src/hooks/useWaterfall.ts) and [`src/hooks/useAudio.ts`](../src/hooks/useAudio.ts)).
 
 ---
 
 ## 4. Threading model
 
 ```
-Main thread (Tauri)
-  └── Command handlers (async, tokio)
+Main thread (Tauri async)
+  └── Command handlers (tokio)
 
-tokio runtime
-  ├── Stream task      ← reads IQ from RTL-SDR in a loop
-  │     └── sends IQ chunks to DSP channel (mpsc)
-  ├── DSP task         ← reads IQ, runs FFT + demod
-  │     ├── emits waterfall-frame event
-  │     └── sends PCM to audio channel
-  └── Audio task       ← buffers PCM, emits audio-chunk event
+Dedicated std::thread (per stream)
+  └── hardware/stream.rs: rtlsdr_read_async loop
+        └── bounded mpsc<DspInput>(cap=8), try_send + drop counter
+
+tokio::task::spawn_blocking (per stream)
+  └── DSP worker (ipc/commands.rs: DspTaskCtx)
+        ├── fs/4 shift + channel filter + demod chain
+        ├── waterfall emit on waterfallChannel  (≤ 40 ms cadence)
+        ├── signal-level emit  (≤ 40 ms cadence, peak decay)
+        └── audio emit on audioChannel          (per AUDIO_CHUNK_SAMPLES)
 ```
 
-**IQ buffer**: `std::sync::mpsc` or `tokio::sync::mpsc` channel between
-stream task and DSP task. Ring buffer size: 8 frames minimum to absorb
-USB jitter without dropping samples.
+The read thread is `std::thread` (not tokio) because `rtlsdr_read_async` blocks until cancelled. The DSP worker is `spawn_blocking` because work is CPU-bound; it uses `blocking_recv` on the IQ channel. Stop is explicit and idempotent: `stop_stream` removes the `Session`, then awaits both handles; `IqStream::Drop` cancels+joins as a safety net.
 
-**Never block the main thread** — all hardware and DSP work is async/tokio.
+Replay mirrors this shape — a tokio task reads the SigMF file, decodes samples, and feeds the same DSP worker type via a `DspInput::Cf32Prefill` priming variant.
 
 ---
 
 ## 5. Data flow diagrams
 
-### Waterfall frame
+### 5.1 Waterfall
 
 ```
-RTL-SDR USB callback
-  → raw IQ bytes (u8 pairs) → convert to f32 complex (I/255-0.5, Q/255-0.5)
-  → ring buffer (capacity: 8×N)
-  → FFT task reads N samples
-  → apply Hann window (see DSP.md §7)
-  → rustfft forward FFT
-  → compute magnitude and dB (see DSP.md §2)
-  → FFT shift (swap halves)
-  → emit binary Tauri event 'waterfall-frame'
-  → React Float32Array → colormap → canvas pixel row → scroll down
+RTL-SDR USB callback (librtlsdr thread)
+  → hardware/stream.rs on_iq: slice.to_vec() + try_send(DspInput::RtlU8)
+  → DspTaskCtx::run (spawn_blocking)
+      ├── iq_u8_to_complex → shifted scratch (reused)
+      ├── apply_fs4_shift (in-place)
+      └── emit_waterfall_frames
+            ├── fft_pending.extend (amortized)
+            └── while ≥ FFT_SIZE:
+                  process_shifted → FFT → |·|² → 10·log10 → fft-shift (in place)
+                  waterfallChannel.send(Raw(bytes))
+  → useWaterfall.onmessage: push(new Float32Array(buffer)) into pending
+  → rAF drain (≤ 360 frames/tick) → Waterfall component → canvas row
 ```
 
-### Audio path
+### 5.2 Audio
 
 ```
-DSP task → demodulated f32 samples
-  → decimate to 44100 Hz
-  → emit binary Tauri event 'audio-chunk'
-  → React Web Audio API AudioContext
-  → AudioBuffer → AudioBufferSourceNode → speakers
+DspTaskCtx → DemodChain (channel filter → decim → mode → LPF → resample 44.1 kHz)
+  → emit_audio_chunks: audioChannel.send(Raw(bytes)) per AUDIO_CHUNK_SAMPLES
+  → useAudio: AudioBuffer + AudioBufferSourceNode with ~80 ms lookahead
+  → GainNode (volume/mute) → destination
 ```
+
+### 5.3 Capture and replay
+
+Capture writes to a temp path produced by `capture::tmp::new_tmp_path`, then `finalize_capture` / `finalize_iq_capture` atomically moves the file(s) to the user-chosen destination. On cancel, `discard_capture` deletes the temp files.
+
+Replay reuses the same DSP worker; `open_replay` parses the SigMF meta, `start_replay` spawns the reader, and `replay-position` ticks the transport slider in the UI.
 
 ---
 
 ## 6. Error handling strategy
 
 ### Rust
-- All public functions return `Result<T, RailError>`
-- Define `RailError` enum in `src-tauri/src/error.rs`
-- Hardware errors (device not found, USB drop) → emit `device-status` event with error
-- DSP errors (buffer underrun) → log warning, skip frame, do not crash
-- File I/O errors → return Err to frontend via command response
+
+- Public functions return `Result<T, RailError>` with the six variants in [`src-tauri/src/error.rs`](../src-tauri/src/error.rs): `DeviceNotFound`, `DeviceOpenFailed`, `StreamError`, `DspError`, `CaptureError`, `InvalidParameter`.
+- `RailError` serializes as `{ kind, message }` (serde `tag = "kind", content = "message"`); TS mirror in [`src/ipc/commands.ts`](../src/ipc/commands.ts).
+- Hardware disconnects emit `device-status` with `connected: false`.
+- DSP-side frame drops (channel full) are counted and logged at power-of-two thresholds — never panic on backpressure.
+- Mutex poisoning is funneled through `session_poisoned` for a single error path.
 
 ### React
-- All `invoke()` calls wrapped in try/catch
-- Hardware disconnection → show modal, offer reconnect
-- Audio buffer underrun → log only, do not show error to user
-- Never silently swallow errors — log with context
 
-### RailError variants (minimum)
-```rust
-pub enum RailError {
-    DeviceNotFound,
-    DeviceOpenFailed(String),
-    StreamError(String),
-    DspError(String),
-    CaptureError(String),
-    InvalidParameter(String),
-}
-```
+- Every `invoke()` is wrapped; failures surface as toasts and/or inline error states.
+- Audio underruns are non-fatal — log only, keep scheduling.
+- Errors are never silently swallowed; callers log with context.

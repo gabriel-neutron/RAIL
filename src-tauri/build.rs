@@ -40,7 +40,10 @@ fn resolve_lib_dir() -> Option<PathBuf> {
         return if p.is_dir() { Some(p) } else { None };
     }
     let crate_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").ok()?);
-    let default = crate_dir.join("..").join("vendor").join("librtlsdr-win-x64");
+    let default = crate_dir
+        .join("..")
+        .join("vendor")
+        .join("librtlsdr-win-x64");
     if default.join("rtlsdr.lib").is_file() {
         Some(default.canonicalize().ok()?)
     } else {

@@ -1,0 +1,21 @@
+{
+  "global": {
+    "core:datatype": "cf32_le",
+    "core:sample_rate": 2048000,
+    "core:version": "1.0.0",
+    "core:description": "RAIL IQ capture",
+    "core:author": "RAIL",
+    "rail:center_frequency_hz": 101583820,
+    "rail:tuner_gain_db": null,
+    "rail:demod_mode": "FM",
+    "rail:filter_bandwidth_hz": 150000
+  },
+  "captures": [
+    {
+      "core:sample_start": 0,
+      "core:datetime": "20260419T093429Z",
+      "core:frequency": 101583820
+    }
+  ],
+  "annotations": []
+}

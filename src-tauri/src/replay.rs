@@ -23,7 +23,7 @@ use tokio::sync::mpsc;
 use crate::capture::sigmf::SigMfMeta;
 use crate::dsp::input::DspInput;
 use crate::error::RailError;
-use crate::ipc::commands::FFT_SIZE;
+use crate::ipc::dsp_task::FFT_SIZE;
 use crate::ipc::events::ReplayPosition;
 
 /// Bytes per cf32 sample on disk (I f32 + Q f32, little-endian).
@@ -61,9 +61,7 @@ impl ReplayInfo {
         if self.sample_rate_hz == 0 {
             return 0;
         }
-        self.total_samples
-            .saturating_mul(1_000)
-            / self.sample_rate_hz as u64
+        self.total_samples.saturating_mul(1_000) / self.sample_rate_hz as u64
     }
 }
 
@@ -72,7 +70,9 @@ pub enum ReplayControl {
     Play,
     Pause,
     /// Absolute sample index. The reader clamps to `total_samples`.
-    Seek { sample_idx: u64 },
+    Seek {
+        sample_idx: u64,
+    },
     Stop,
 }
 
@@ -162,9 +162,7 @@ pub fn load_info(data_path: &Path) -> Result<ReplayInfo, RailError> {
             "sigmf meta missing or zero core:sample_rate".into(),
         ));
     }
-    let datatype = raw["global"]["core:datatype"]
-        .as_str()
-        .unwrap_or("cf32_le");
+    let datatype = raw["global"]["core:datatype"].as_str().unwrap_or("cf32_le");
     if datatype != "cf32_le" {
         return Err(RailError::CaptureError(format!(
             "unsupported SigMF datatype {datatype} (RAIL only reads cf32_le)"
@@ -206,9 +204,7 @@ fn prefill_waterfall(
     if n_rows == 0 {
         // Fewer than one row of history exists before the cursor.
         // Still reposition so the caller can read from sample_idx.
-        let _ = reader.seek(SeekFrom::Start(
-            sample_idx.saturating_mul(BYTES_PER_SAMPLE),
-        ));
+        let _ = reader.seek(SeekFrom::Start(sample_idx.saturating_mul(BYTES_PER_SAMPLE)));
         return true;
     }
 
@@ -232,7 +228,10 @@ fn prefill_waterfall(
             let im = f32::from_le_bytes([pair[4], pair[5], pair[6], pair[7]]);
             samples.push(Complex::new(re, im));
         }
-        if dsp_tx.blocking_send(DspInput::Cf32Prefill(samples)).is_err() {
+        if dsp_tx
+            .blocking_send(DspInput::Cf32Prefill(samples))
+            .is_err()
+        {
             return false;
         }
     }
@@ -276,7 +275,8 @@ pub fn spawn_replay_reader<R: tauri::Runtime>(
         };
         let mut reader = BufReader::with_capacity(256 * 1024, file);
 
-        let chunk_samples: usize = ((info.sample_rate_hz as u64 * CHUNK_MS) / 1_000).max(1) as usize;
+        let chunk_samples: usize =
+            ((info.sample_rate_hz as u64 * CHUNK_MS) / 1_000).max(1) as usize;
         let chunk_duration = Duration::from_millis(CHUNK_MS);
         let total_ms = info.duration_ms();
 
@@ -291,7 +291,8 @@ pub fn spawn_replay_reader<R: tauri::Runtime>(
             } else {
                 0
             };
-            if let Err(e) = ReplayPosition::new(sample_idx, position_ms, total_ms, playing).emit(&app)
+            if let Err(e) =
+                ReplayPosition::new(sample_idx, position_ms, total_ms, playing).emit(&app)
             {
                 log::warn!("replay-position emit failed: {e}");
             }
@@ -317,12 +318,8 @@ pub fn spawn_replay_reader<R: tauri::Runtime>(
                     }
                     Ok(ReplayControl::Seek { sample_idx: s }) => {
                         sample_idx = s.min(info.total_samples);
-                        if !prefill_waterfall(
-                            &mut reader,
-                            &dsp_tx,
-                            sample_idx,
-                            info.sample_rate_hz,
-                        ) {
+                        if !prefill_waterfall(&mut reader, &dsp_tx, sample_idx, info.sample_rate_hz)
+                        {
                             emit_position(sample_idx, false);
                             return;
                         }
@@ -354,12 +351,8 @@ pub fn spawn_replay_reader<R: tauri::Runtime>(
                     Some(ReplayControl::Pause) => continue,
                     Some(ReplayControl::Seek { sample_idx: s }) => {
                         sample_idx = s.min(info.total_samples);
-                        if !prefill_waterfall(
-                            &mut reader,
-                            &dsp_tx,
-                            sample_idx,
-                            info.sample_rate_hz,
-                        ) {
+                        if !prefill_waterfall(&mut reader, &dsp_tx, sample_idx, info.sample_rate_hz)
+                        {
                             emit_position(sample_idx, false);
                             return;
                         }
@@ -411,7 +404,10 @@ pub fn spawn_replay_reader<R: tauri::Runtime>(
             }
             next_tick += chunk_duration;
 
-            if dsp_tx.blocking_send(DspInput::Cf32Shifted(samples)).is_err() {
+            if dsp_tx
+                .blocking_send(DspInput::Cf32Shifted(samples))
+                .is_err()
+            {
                 // DSP task exited; nothing more to do.
                 emit_position(sample_idx, false);
                 return;

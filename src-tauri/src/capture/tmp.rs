@@ -23,8 +23,7 @@ pub fn tmp_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, RailError> {
         .app_data_dir()
         .map_err(|e| RailError::CaptureError(format!("app_data_dir: {e}")))?;
     let dir = base.join(TMP_SUBDIR);
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| RailError::CaptureError(format!("tmp dir: {e}")))?;
+    std::fs::create_dir_all(&dir).map_err(|e| RailError::CaptureError(format!("tmp dir: {e}")))?;
     Ok(dir)
 }
 
@@ -52,8 +51,7 @@ pub fn move_file(src: &Path, dst: &Path) -> Result<(), RailError> {
     match std::fs::rename(src, dst) {
         Ok(()) => Ok(()),
         Err(_) => {
-            std::fs::copy(src, dst)
-                .map_err(|e| RailError::CaptureError(format!("copy: {e}")))?;
+            std::fs::copy(src, dst).map_err(|e| RailError::CaptureError(format!("copy: {e}")))?;
             std::fs::remove_file(src).ok();
             Ok(())
         }

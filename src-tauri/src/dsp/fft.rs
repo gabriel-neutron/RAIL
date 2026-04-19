@@ -56,7 +56,11 @@ impl FftProcessor {
     pub fn process(&mut self, iq: &[Complex<f32>]) -> &[f32] {
         debug_assert_eq!(iq.len(), self.n, "FFT input length mismatch");
 
-        for (dst, (&src, &w)) in self.buffer.iter_mut().zip(iq.iter().zip(self.window.iter())) {
+        for (dst, (&src, &w)) in self
+            .buffer
+            .iter_mut()
+            .zip(iq.iter().zip(self.window.iter()))
+        {
             *dst = src * w;
         }
 

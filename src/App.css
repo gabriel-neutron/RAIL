@@ -179,11 +179,28 @@ html,
   gap: 12px;
 }
 
-.frequency-control-value {
+.frequency-control-frequency {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  background-color: #141a22;
+  border: 1px solid #1a1f26;
+  color: #e7ebf1;
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 22px;
-  color: #e7ebf1;
   letter-spacing: 0.02em;
+  padding: 4px 10px;
+  border-radius: 4px;
+}
+
+.frequency-control-frequency:focus {
+  outline: none;
+  border-color: #3aa0ff;
+}
+
+.frequency-control-frequency:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .frequency-control-units {
@@ -211,22 +228,6 @@ html,
 .unit-btn-active {
   background-color: #1a2a3a;
   color: #3aa0ff;
-}
-
-.frequency-control-input {
-  background-color: #141a22;
-  border: 1px solid #1a1f26;
-  color: #e7ebf1;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 13px;
-  padding: 4px 8px;
-  border-radius: 4px;
-  width: 100%;
-}
-
-.frequency-control-input:focus {
-  outline: none;
-  border-color: #3aa0ff;
 }
 
 .frequency-control-steps {

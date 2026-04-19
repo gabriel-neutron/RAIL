@@ -65,8 +65,20 @@ impl BookmarksStore {
 
     fn load_file(path: &Path) -> Result<BookmarksFile, RailError> {
         match fs::read_to_string(path) {
-            Ok(s) => serde_json::from_str::<BookmarksFile>(&s)
-                .map_err(|e| RailError::CaptureError(format!("bookmarks.json parse: {e}"))),
+            Ok(s) => {
+                let file = serde_json::from_str::<BookmarksFile>(&s)
+                    .map_err(|e| RailError::CaptureError(format!("bookmarks.json parse: {e}")))?;
+                // Refuse to load formats newer than this build supports.
+                // Without this guard, a Phase 7 schema bump would silently
+                // drop unknown fields on the next save (see REVIEW_V1.md §6).
+                if file.version > FILE_VERSION {
+                    return Err(RailError::CaptureError(format!(
+                        "bookmarks.json version {} is newer than supported ({})",
+                        file.version, FILE_VERSION
+                    )));
+                }
+                Ok(file)
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(BookmarksFile::default()),
             Err(e) => Err(RailError::CaptureError(format!("bookmarks.json read: {e}"))),
         }
@@ -95,9 +107,10 @@ impl BookmarksStore {
     /// Return the full list, sorted by `createdAt` ascending (stable order
     /// the UI can rely on for chip layout).
     pub fn list<R: Runtime>(&self, app: &AppHandle<R>) -> Result<Vec<Bookmark>, RailError> {
-        let _guard = self.lock.lock().map_err(|_| {
-            RailError::CaptureError("bookmarks lock poisoned".into())
-        })?;
+        let _guard = self
+            .lock
+            .lock()
+            .map_err(|_| RailError::CaptureError("bookmarks lock poisoned".into()))?;
         let file = Self::load_file(&Self::path(app)?)?;
         let mut out = file.bookmarks;
         out.sort_by_key(|b| b.created_at);
@@ -115,9 +128,10 @@ impl BookmarksStore {
         if trimmed.is_empty() {
             return Err(RailError::InvalidParameter("bookmark name empty".into()));
         }
-        let _guard = self.lock.lock().map_err(|_| {
-            RailError::CaptureError("bookmarks lock poisoned".into())
-        })?;
+        let _guard = self
+            .lock
+            .lock()
+            .map_err(|_| RailError::CaptureError("bookmarks lock poisoned".into()))?;
         let path = Self::path(app)?;
         let mut file = Self::load_file(&path)?;
         let now_nanos = SystemTime::now()
@@ -136,9 +150,10 @@ impl BookmarksStore {
 
     /// Remove a bookmark by id. Missing id is a no-op (idempotent).
     pub fn remove<R: Runtime>(&self, app: &AppHandle<R>, id: &str) -> Result<(), RailError> {
-        let _guard = self.lock.lock().map_err(|_| {
-            RailError::CaptureError("bookmarks lock poisoned".into())
-        })?;
+        let _guard = self
+            .lock
+            .lock()
+            .map_err(|_| RailError::CaptureError("bookmarks lock poisoned".into()))?;
         let path = Self::path(app)?;
         let mut file = Self::load_file(&path)?;
         file.bookmarks.retain(|b| b.id != id);
@@ -153,9 +168,10 @@ impl BookmarksStore {
         app: &AppHandle<R>,
         bookmarks: Vec<Bookmark>,
     ) -> Result<Vec<Bookmark>, RailError> {
-        let _guard = self.lock.lock().map_err(|_| {
-            RailError::CaptureError("bookmarks lock poisoned".into())
-        })?;
+        let _guard = self
+            .lock
+            .lock()
+            .map_err(|_| RailError::CaptureError("bookmarks lock poisoned".into()))?;
         let mut file = BookmarksFile {
             version: FILE_VERSION,
             bookmarks,
@@ -177,6 +193,19 @@ mod tests {
         let file = BookmarksStore::load_file(&path).unwrap();
         assert_eq!(file.version, FILE_VERSION);
         assert!(file.bookmarks.is_empty());
+    }
+
+    #[test]
+    fn load_file_rejects_future_version() {
+        let dir = tempdir();
+        let path = dir.join("bookmarks.json");
+        fs::write(&path, r#"{"version":2,"bookmarks":[]}"#).unwrap();
+        match BookmarksStore::load_file(&path) {
+            Err(RailError::CaptureError(msg)) => {
+                assert!(msg.contains("newer than supported"), "got: {msg}");
+            }
+            other => panic!("expected CaptureError, got {other:?}"),
+        }
     }
 
     #[test]
