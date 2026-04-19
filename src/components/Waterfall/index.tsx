@@ -21,6 +21,13 @@ const DRAG_THRESHOLD_PX = 4;
 /// on the waterfall canvas. Matches `.waterfall-canvas`'s CSS bg.
 const WATERFALL_BG = "#07090c";
 
+/// Dev-only: `localStorage.setItem("rail_profile_waterfall", "1")` then reload.
+/// Logs rolling averages for LUT vs canvas blit (see docs/PERF.md).
+const waterfallProfileEnabled = (): boolean =>
+  import.meta.env.DEV &&
+  typeof localStorage !== "undefined" &&
+  localStorage.getItem("rail_profile_waterfall") === "1";
+
 type WaterfallProps = {
   enabled?: boolean;
   onAudio?: (frame: Float32Array) => void;
@@ -311,6 +318,8 @@ function drawWaterfallRow(
   const pixels = row.data;
   const span = DB_PEAK - DB_FLOOR;
   const lutEntries = lut.length / 3;
+  const profile = waterfallProfileEnabled();
+  const t0 = profile ? performance.now() : 0;
   for (let i = 0; i < frame.length; i += 1) {
     const normalized = Math.max(
       0,
@@ -324,6 +333,7 @@ function drawWaterfallRow(
     pixels[out + 2] = lut[offset + 2];
     pixels[out + 3] = 255;
   }
+  const t1 = profile ? performance.now() : 0;
 
   ctx.drawImage(
     canvas,
@@ -337,7 +347,28 @@ function drawWaterfallRow(
     canvas.height - 1,
   );
   ctx.putImageData(row, 0, 0);
+  if (profile) {
+    const t2 = performance.now();
+    const acc = drawWaterfallRowProfAccum;
+    acc.lut += t1 - t0;
+    acc.blit += t2 - t1;
+    acc.n += 1;
+    if (acc.n >= 60) {
+      console.info(
+        "[rail waterfall profile] avg ms / frame — lut:",
+        (acc.lut / acc.n).toFixed(3),
+        "blit:",
+        (acc.blit / acc.n).toFixed(3),
+        `(n=${acc.n}, bins=${frame.length})`,
+      );
+      acc.lut = 0;
+      acc.blit = 0;
+      acc.n = 0;
+    }
+  }
 }
+
+const drawWaterfallRowProfAccum = { lut: 0, blit: 0, n: 0 };
 
 /// Draw a dB-scaled magnitude curve (filled under the line) on the
 /// spectrum canvas. Uses the same `[DB_FLOOR, DB_PEAK]` range as the

@@ -3,7 +3,7 @@
 //! Hosts [`DspTaskCtx`] and [`spawn_dsp_task`] — the audio/waterfall
 //! emit loop that `start_stream` and `start_replay` both drive. Kept
 //! in its own module so the tuning/lifecycle commands in
-//! [`super::commands`] stay short (see REVIEW_V1.md §5.3).
+//! [`super::commands`] stay short.
 
 use std::time::{Duration, Instant};
 
@@ -22,6 +22,9 @@ use crate::error::RailError;
 use crate::hardware::stream::{IqCanceler, DEFAULT_USB_BUF_LEN};
 use crate::ipc::capture_cmd::{AudioStopInfo, CaptureControl, IqStopInfo};
 use crate::ipc::events::SignalLevel;
+use crate::perf_emit::{
+    record_audio_emit_interval, record_signal_level_emit_interval, record_waterfall_emit_interval,
+};
 
 /// FFT size (bins). Matches `docs/DSP.md` §2 default.
 pub(crate) const FFT_SIZE: usize = 2048;
@@ -76,8 +79,7 @@ struct DspTaskCtx<R: Runtime> {
     /// Samples awaiting enough length for a full FFT frame.
     fft_pending: Vec<Complex<f32>>,
     /// Reused scratch for one FFT frame (capacity `FFT_SIZE`).
-    /// Avoids a per-frame allocation in `emit_waterfall_frames`
-    /// (see REVIEW_V1.md §4.1).
+    /// Avoids a per-frame allocation in `emit_waterfall_frames`.
     frame_buf: Vec<Complex<f32>>,
     /// Resampled audio awaiting enough length to ship a chunk.
     audio_pending: Vec<f32>,
@@ -98,9 +100,9 @@ struct DspTaskCtx<R: Runtime> {
 /// Move exactly `n` items from `pending` into `scratch`, reusing
 /// `scratch`'s allocation. Panics (debug only) if `pending.len() < n`.
 ///
-/// This is the allocation-free replacement for the `drain(..n).collect()`
-/// pattern called out in REVIEW_V1.md §4.1. Extracted so the reuse
-/// property can be asserted without a Tauri runtime.
+/// This is the allocation-free replacement for `drain(..n).collect()` on
+/// each FFT frame. Extracted so the reuse property can be asserted without
+/// a Tauri runtime.
 #[inline]
 fn take_frame<T: Copy>(pending: &mut Vec<T>, scratch: &mut Vec<T>, n: usize) {
     debug_assert!(pending.len() >= n);
@@ -318,6 +320,8 @@ impl<R: Runtime> DspTaskCtx<R> {
         };
         if let Err(e) = SignalLevel::new(current, self.peak_dbfs).emit(&self.app) {
             log::warn!("signal-level emit failed: {e}");
+        } else {
+            record_signal_level_emit_interval();
         }
         self.last_level_emit = Instant::now();
     }
@@ -352,6 +356,7 @@ impl<R: Runtime> DspTaskCtx<R> {
                     }
                     return false;
                 }
+                record_waterfall_emit_interval();
             }
             Err(e) => log::warn!("prefill frame build failed: {e}"),
         }
@@ -386,6 +391,7 @@ impl<R: Runtime> DspTaskCtx<R> {
                         }
                         return false;
                     }
+                    record_waterfall_emit_interval();
                     self.last_emit = Instant::now();
                 }
                 Err(e) => {
@@ -418,6 +424,7 @@ impl<R: Runtime> DspTaskCtx<R> {
                 }
                 return false;
             }
+            record_audio_emit_interval();
         }
         true
     }

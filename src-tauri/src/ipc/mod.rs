@@ -4,7 +4,7 @@
 //!
 //! `commands` hosts the session lifecycle and tuning surface. The higher-rate
 //! paths (capture, replay, DSP worker) are split into sibling modules so
-//! `commands.rs` stays readable. See REVIEW_V1.md §5.3.
+//! `commands.rs` stays readable.
 
 pub mod commands;
 pub mod events;

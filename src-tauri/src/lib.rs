@@ -9,6 +9,7 @@ pub mod dsp;
 pub mod error;
 pub mod hardware;
 pub mod ipc;
+pub mod perf_emit;
 pub mod replay;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

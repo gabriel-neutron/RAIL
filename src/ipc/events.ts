@@ -2,12 +2,18 @@
 // Event names and payload shapes defined in docs/ARCHITECTURE.md §3.
 // Waterfall frames travel on a per-session Channel (see ipc/commands.ts),
 // not on the event bus.
+//
+// String literals: shared/ipc_event_names.json (see scripts/gen-ipc-event-names.mjs).
 
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-export const EVENT_DEVICE_STATUS = "device-status";
-export const EVENT_SIGNAL_LEVEL = "signal-level";
-export const EVENT_REPLAY_POSITION = "replay-position";
+import {
+  EVENT_DEVICE_STATUS,
+  EVENT_REPLAY_POSITION,
+  EVENT_SIGNAL_LEVEL,
+} from "./generated/eventNames";
+
+export { EVENT_DEVICE_STATUS, EVENT_REPLAY_POSITION, EVENT_SIGNAL_LEVEL };
 
 export type DeviceStatusPayload = {
   connected: boolean;

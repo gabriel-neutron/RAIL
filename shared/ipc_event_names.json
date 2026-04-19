@@ -1,0 +1,5 @@
+{
+  "EVENT_DEVICE_STATUS": "device-status",
+  "EVENT_SIGNAL_LEVEL": "signal-level",
+  "EVENT_REPLAY_POSITION": "replay-position"
+}

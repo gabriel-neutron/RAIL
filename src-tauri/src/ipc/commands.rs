@@ -6,8 +6,7 @@
 //! See `docs/ARCHITECTURE.md` §3 and `docs/DSP.md` §4–5.
 //!
 //! Capture, replay, and the DSP worker live in sibling modules:
-//! [`super::capture_cmd`], [`super::replay_cmd`], [`super::dsp_task`]
-//! (split per REVIEW_V1.md §5.3).
+//! [`super::capture_cmd`], [`super::replay_cmd`], [`super::dsp_task`].
 
 use std::sync::Mutex;
 

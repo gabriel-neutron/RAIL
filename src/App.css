@@ -890,12 +890,6 @@ html,
   font-variant-numeric: tabular-nums;
 }
 
-.signal-meter-placeholder {
-  min-height: 200px;
-  border: 1px dashed #1a1f26;
-  border-radius: 6px;
-}
-
 /* -------- MenuBar capture REC dot -------- */
 
 .menu-rec-dot {

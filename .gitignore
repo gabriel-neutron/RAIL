@@ -12,9 +12,8 @@ dist
 dist-ssr
 *.local
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
+# Editor (entire folder untracked — use local-only settings / extensions)
+.vscode/
 .idea
 .DS_Store
 *.suo

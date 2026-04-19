@@ -5,8 +5,7 @@
 //! [`crate::capture::tmp::new_tmp_path`], the DSP worker writes into
 //! it, then `finalize_*` / `discard_*` atomically moves or deletes
 //! the temp file when the user confirms the Save dialog. See
-//! `docs/SIGNALS.md` §1–2 and REVIEW_V1.md §5.3 for the split
-//! rationale.
+//! `docs/SIGNALS.md` §1–2 and `docs/ARCHITECTURE.md` §2–3 for context.
 
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};

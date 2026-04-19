@@ -3,7 +3,7 @@
 //! Opens a SigMF `.sigmf-data` file and drives the same DSP worker
 //! that the live stream uses, via
 //! [`crate::replay::spawn_replay_reader`] instead of the RTL-SDR.
-//! See `docs/ARCHITECTURE.md` §3 and REVIEW_V1.md §5.3.
+//! See `docs/ARCHITECTURE.md` §3.
 
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Runtime, State};

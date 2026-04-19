@@ -70,7 +70,7 @@ impl BookmarksStore {
                     .map_err(|e| RailError::CaptureError(format!("bookmarks.json parse: {e}")))?;
                 // Refuse to load formats newer than this build supports.
                 // Without this guard, a Phase 7 schema bump would silently
-                // drop unknown fields on the next save (see REVIEW_V1.md §6).
+                // drop unknown fields on the next save.
                 if file.version > FILE_VERSION {
                     return Err(RailError::CaptureError(format!(
                         "bookmarks.json version {} is newer than supported ({})",

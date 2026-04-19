@@ -16,6 +16,8 @@ use std::{
 };
 
 fn main() {
+    emit_ipc_event_names();
+
     let lib_dir = resolve_lib_dir();
     if let Some(dir) = lib_dir.as_ref() {
         println!("cargo:rustc-link-search=native={}", dir.display());
@@ -32,6 +34,32 @@ fn main() {
     }
 
     tauri_build::build()
+}
+
+/// Single source of truth: `shared/ipc_event_names.json` (see also
+/// `scripts/gen-ipc-event-names.mjs` for TypeScript).
+fn emit_ipc_event_names() {
+    use std::collections::BTreeMap;
+
+    let out_dir = env::var("OUT_DIR").expect("OUT_DIR must be set by Cargo");
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let json_path = manifest_dir
+        .join("..")
+        .join("shared")
+        .join("ipc_event_names.json");
+    println!("cargo:rerun-if-changed={}", json_path.display());
+
+    let raw = fs::read_to_string(&json_path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", json_path.display()));
+    let map: BTreeMap<String, String> =
+        serde_json::from_str(&raw).unwrap_or_else(|e| panic!("parse {}: {e}", json_path.display()));
+
+    let mut body = String::new();
+    for (k, v) in map {
+        body.push_str(&format!("pub const {}: &str = {:?};\n", k, v));
+    }
+    let out = PathBuf::from(out_dir).join("generated_ipc_event_names.rs");
+    fs::write(&out, body).expect("write generated_ipc_event_names.rs");
 }
 
 fn resolve_lib_dir() -> Option<PathBuf> {

@@ -6,19 +6,12 @@
 //! Low-rate status updates (device connect/disconnect) use the regular
 //! JSON event bus via [`DeviceStatus::emit`]. See `docs/ARCHITECTURE.md` §3.
 
+include!(concat!(env!("OUT_DIR"), "/generated_ipc_event_names.rs"));
+
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Runtime};
 
 use crate::error::RailError;
-
-/// Event name for device connection updates (`docs/ARCHITECTURE.md` §3).
-pub const EVENT_DEVICE_STATUS: &str = "device-status";
-
-/// Event name for periodic signal-strength updates (`docs/ARCHITECTURE.md` §3).
-pub const EVENT_SIGNAL_LEVEL: &str = "signal-level";
-
-/// Event name for IQ-replay transport updates (position slider).
-pub const EVENT_REPLAY_POSITION: &str = "replay-position";
 
 /// Payload for the `device-status` JSON event.
 #[derive(Debug, Clone, Serialize)]

@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "gen:ipc-events": "node scripts/gen-ipc-event-names.mjs",
+    "predev": "node scripts/gen-ipc-event-names.mjs",
+    "prebuild": "node scripts/gen-ipc-event-names.mjs",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",

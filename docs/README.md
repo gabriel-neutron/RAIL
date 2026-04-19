@@ -18,6 +18,7 @@
 | `TECH_STACK.md` | Approved technologies, versions, dependencies, tooling choices | Active |
 | `PRD.md` | Product requirements, scope, UX goals, acceptance criteria | Active |
 | `TIMELINE.md` | Development phases, milestones, task ordering | Active |
+| `PERF.md` | Runtime profiling: waterfall LUT vs blit, optional Rust `profile` feature, CSS coverage | Active |
 
 ---
 
@@ -45,5 +46,6 @@ Every time a file in `/docs/` is created or modified:
 - **"What tech and versions are approved?"** → `TECH_STACK.md`
 - **"What are the product goals and acceptance criteria?"** → `PRD.md`
 - **"What should I build next?"** → `TIMELINE.md`
+- **"How do I profile waterfall or Rust emit intervals?"** → `PERF.md`
 - **"What FFT size should I use?"** → `DSP.md`
 - **"How do I handle RTL-SDR errors?"** → `HARDWARE.md`
