@@ -7,7 +7,50 @@ on:
   workflow_dispatch:
 
 jobs:
+  create-release:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create_release.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create or get release
+        id: create_release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              const { data } = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: '${{ github.ref_name }}',
+              });
+              return data.id;
+            } catch (_) {
+              const { data } = await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: '${{ github.ref_name }}',
+                name: 'RAIL ${{ github.ref_name }}',
+                body: [
+                  'See `README.md` for installation instructions.',
+                  '',
+                  'Installers are built by `tauri-action` for Linux, macOS, and Windows.',
+                  'On Linux, install your distro\'s RTL-SDR library if the app fails to start',
+                  '(package name varies, e.g. `librtlsdr2` on recent Ubuntu).',
+                  'Windows users must install the WinUSB driver via Zadig before first run',
+                  '(see `docs/HARDWARE.md` §6).',
+                ].join('\n'),
+                draft: false,
+                prerelease: false,
+              });
+              return data.id;
+            }
+
   publish-tauri:
+    needs: create-release
     permissions:
       contents: write
     strategy:
@@ -37,7 +80,10 @@ jobs:
 
       - name: Install macOS dependencies
         if: matrix.platform == 'macos-latest'
-        run: brew install librtlsdr
+        run: |
+          brew install librtlsdr
+          echo "LIBRTLSDR_LIB_DIR=$(brew --prefix librtlsdr)/lib" >> $GITHUB_ENV
+          echo "LIBRARY_PATH=$(brew --prefix)/lib${LIBRARY_PATH:+:$LIBRARY_PATH}" >> $GITHUB_ENV
 
       - name: Fetch librtlsdr Windows prebuilts
         if: matrix.platform == 'windows-latest'
@@ -47,9 +93,15 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile "librtlsdr.zip"
           Expand-Archive -Path "librtlsdr.zip" -DestinationPath "librtlsdr-win"
           New-Item -ItemType Directory -Force -Path vendor/librtlsdr-win-x64 | Out-Null
-          Get-ChildItem -Recurse -Path "librtlsdr-win" -Include rtlsdr.dll,rtlsdr.lib,pthreadVC2.dll,msvcr100.dll |
-            ForEach-Object { Copy-Item $_.FullName -Destination vendor/librtlsdr-win-x64/ -Force }
+          foreach ($file in @("rtlsdr.dll", "rtlsdr.lib", "pthreadVC2.dll", "msvcr100.dll")) {
+            $src = "librtlsdr-win\x64\$file"
+            if (Test-Path $src) { Copy-Item $src -Destination vendor/librtlsdr-win-x64/ -Force }
+          }
           Get-ChildItem vendor/librtlsdr-win-x64/
+          if (-not (Test-Path "vendor/librtlsdr-win-x64/rtlsdr.lib")) {
+            Write-Error "rtlsdr.lib not found in prebuilts — linker will fail"; exit 1
+          }
+          echo "LIBRTLSDR_LIB_DIR=$env:GITHUB_WORKSPACE\vendor\librtlsdr-win-x64" >> $env:GITHUB_ENV
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -69,15 +121,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'RAIL ${{ github.ref_name }}'
-          releaseBody: |
-            See `CHANGELOG` and `README.md` for release notes and installation instructions.
-
-            Installers below are produced by `tauri-action`. On Linux,
-            install your distro's RTL-SDR library if the app fails to start
-            (package name varies, e.g. `librtlsdr2` on recent Ubuntu). Windows users
-            must install the WinUSB driver via Zadig before first run
-            (see `docs/HARDWARE.md` §6).
-          releaseDraft: true
-          prerelease: false
+          releaseId: ${{ needs.create-release.outputs.release_id }}
