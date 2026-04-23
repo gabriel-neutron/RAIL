@@ -4,7 +4,8 @@
 1. [SigMF format specification](#1-sigmf-format-specification)
 2. [Capture session schema](#2-capture-session-schema)
 3. [Signal type taxonomy](#3-signal-type-taxonomy)
-4. [Frequency domains in RAIL's antenna range](#4-frequency-domains-in-rails-antenna-range)
+4. [Receivable signals by frequency band](#4-receivable-signals-by-frequency-band)
+5. [Classification heuristics reference](#5-classification-heuristics-reference)
 
 ---
 
@@ -93,43 +94,361 @@ Not SigMF — SigMF is for raw IQ only.
 
 ## 3. Signal type taxonomy
 
-For V1, RAIL uses a simple signal classification vocabulary.
-Used in session annotations and (later) automated detection.
+RAIL uses a fixed vocabulary for signal classification.
+Used in session annotations and automated detection (Phase 10+).
 
-| Label | Description | Typical bandwidth |
-|---|---|---|
-| `WBFM` | Wideband FM broadcast | 150–200 kHz |
-| `NBFM` | Narrowband FM (voice, PMR) | 5–25 kHz |
-| `AM` | Amplitude modulation | 3–30 kHz |
-| `USB` | Upper sideband SSB | 3 kHz |
-| `LSB` | Lower sideband SSB | 3 kHz |
-| `CW` | Morse code (carrier wave) | <1 kHz |
-| `digital_narrowband` | Unknown digital, narrow | <25 kHz |
-| `digital_wideband` | Unknown digital, wide | >25 kHz |
-| `burst` | Short-duration unknown | varies |
-| `carrier` | Unmodulated carrier | near 0 |
-| `unknown` | No classification | — |
+| Label | Description | Typical BW | Modulation family |
+|---|---|---|---|
+| `WBFM` | Wideband FM broadcast | 150–200 kHz | Analog FM |
+| `NBFM` | Narrowband FM (voice, PMR, amateur) | 5–25 kHz | Analog FM |
+| `AM` | Amplitude modulation (aviation, broadcast) | 3–30 kHz | Analog AM |
+| `USB` | Upper sideband SSB | ~3 kHz | Analog SSB |
+| `LSB` | Lower sideband SSB | ~3 kHz | Analog SSB |
+| `CW` | Morse code | < 1 kHz | On/off keying |
+| `ADS-B` | Aircraft transponder (Mode S) | ~1 MHz burst | Digital OOK-PPM |
+| `AIS` | Maritime ship transponder | ~25 kHz | Digital GMSK |
+| `APRS` | Amateur packet reporting (AX.25) | ~16 kHz | Digital AFSK 1200 |
+| `NOAA-APT` | Weather satellite image | ~40 kHz | Analog FM + 2400 Hz sub |
+| `OOK` | On/off keying (ISM remotes, sensors) | 1–100 kHz | Digital OOK/ASK |
+| `POCSAG` | Paging protocol | ~12.5 kHz | Digital FSK |
+| `digital_narrowband` | Unknown digital, narrow | < 25 kHz | Unknown digital |
+| `digital_wideband` | Unknown digital, wide | > 25 kHz | Unknown digital |
+| `burst` | Short-duration unknown | varies | Unknown |
+| `carrier` | Unmodulated carrier | near 0 | None |
+| `unknown` | No classification | — | — |
 
 ---
 
-## 4. Frequency domains in RAIL's antenna range
+## 4. Receivable signals by frequency band
 
-RAIL's supported antenna range: ~100 kHz – 1.75 GHz.
+**Hardware reference**: RTL-SDR with R820T2 tuner.
+Reliable coverage: **~24 MHz – 1766 MHz** (R820T2).
+Practical sweet spot: **50 MHz – 1.5 GHz** (best sensitivity).
+Below 24 MHz requires a direct-sampling hardware modification — not supported by RAIL.
 
-| Band | Range | Common signals |
+Signal entries marked **[RAIL: done]** are already implemented.
+Entries marked **[RAIL: Phase N]** indicate the planned implementation phase.
+
+---
+
+### 4.1 FM Broadcast — 87.5–108 MHz
+
+| Signal | Center freq | BW | Modulation | Reception | RAIL |
+|---|---|---|---|---|---|
+| WBFM stereo | 87.5–108 MHz (200 kHz steps) | ~200 kHz | FM (±75 kHz dev) | Excellent | done |
+| RDS/RBDS | 57 kHz subcarrier on FM stations | <5 kHz | BPSK subcarrier | Excellent | not planned |
+
+**Notes**: Strongest signals in the entire RTL-SDR range. Primary demo band.
+RDS carries station name, song info, and traffic data — decoding it requires a
+57 kHz subcarrier demodulator + BPSK decoder, not planned for V2.
+
+---
+
+### 4.2 Aeronautical Navigation — 108–118 MHz
+
+| Signal | Center freq | BW | Modulation | Reception | RAIL |
+|---|---|---|---|---|---|
+| VOR beacon | 108–118 MHz (50 kHz steps) | ~50 kHz | AM + 30 Hz + 9960 Hz sub | Good | not planned |
+| ILS Localizer | 108.1–111.95 MHz | ~50 kHz | AM with 90/150 Hz tones | Good | not planned |
+
+**Notes**: AM modulation family; decodable with AM demod but meaningful decoding
+requires tone analysis (30 Hz, 9960 Hz, 90/150 Hz). Classification hint: AM signal
+in 108–118 MHz range → likely VOR or ILS.
+
+---
+
+### 4.3 Aviation Voice (ATC) — 118–137 MHz
+
+| Signal | Center freq | BW | Modulation | Reception | RAIL |
+|---|---|---|---|---|---|
+| ATC voice | 118–136.975 MHz (25 kHz steps) | ~8–12 kHz | AM (DSB-LC) | Excellent | done |
+| ATIS | Varies per airport | ~8 kHz | AM | Excellent | done |
+| VOLMET | 127.0, 128.6 MHz (varies by region) | ~8 kHz | AM | Good | done |
+
+**Notes**: Standard AM demodulator works directly. Very rewarding band —
+aircraft and ground communications are clearly audible near any airport.
+Classification hint: AM signal in 118–137 MHz → very likely aviation voice.
+
+---
+
+### 4.4 Weather Satellites — 137–138 MHz
+
+| Signal | Center freq | BW | Modulation | Reception | RAIL |
+|---|---|---|---|---|---|
+| NOAA 15 APT | 137.620 MHz | ~40 kHz | FM + 2400 Hz sub | Good (overhead pass) | not planned |
+| NOAA 18 APT | 137.912 MHz | ~40 kHz | FM + 2400 Hz sub | Good (overhead pass) | not planned |
+| NOAA 19 APT | 137.100 MHz | ~40 kHz | FM + 2400 Hz sub | Good (overhead pass) | not planned |
+
+**Notes**: Requires a directional (V-dipole) antenna and passes only last ~10 min.
+APT decoding (image reconstruction from audio tones) is complex and not in scope.
+Classification hint: FM signal at exactly 137.100/137.620/137.912 MHz → NOAA-APT.
+
+---
+
+### 4.5 VHF Amateur Radio (2m) — 144–146 MHz (EU) / 144–148 MHz (US)
+
+| Signal | Center freq | BW | Modulation | Reception | RAIL |
+|---|---|---|---|---|---|
+| FM voice (repeaters) | 144.300–146.000 MHz (EU) | 12.5–25 kHz | NBFM | Excellent | Phase 8 |
+| SSB voice (DX) | 144.100–144.400 MHz | ~3 kHz | USB | Good | Phase 8 |
+| APRS | 144.800 MHz (EU) / 144.390 MHz (US) | ~16 kHz | AFSK 1200 baud | Excellent | not planned |
+| CW | 144.000–144.150 MHz | < 1 kHz | CW | Good | Phase 8 |
+
+**Notes**: APRS (Automatic Packet Reporting System) broadcasts GPS positions,
+weather, and text messages over AX.25 packet radio. The audio sounds like
+a modem at 1200 baud. Decoding requires an AX.25 demodulator — not in V2 scope,
+but detection (identifying the characteristic AFSK tones) is feasible in Phase 10.
+Classification hint: NBFM signal at 144.800 MHz → very likely APRS.
+
+---
+
+### 4.6 Maritime VHF — 156–174 MHz
+
+| Signal | Center freq | BW | Modulation | Reception | RAIL |
+|---|---|---|---|---|---|
+| VHF voice | All channels, ch16 = 156.800 MHz | 12.5–25 kHz | NBFM | Excellent | Phase 8 |
+| AIS channel 1 | 161.975 MHz | ~25 kHz | GMSK 9600 baud | Excellent | not planned |
+| AIS channel 2 | 162.025 MHz | ~25 kHz | GMSK 9600 baud | Excellent | not planned |
+
+**Notes**: AIS (Automatic Identification System) continuously broadcasts ship
+identity (MMSI), position, speed, and course. Ships within ~40 km are typically
+audible. AIS decoding requires GMSK demodulation + NMEA sentence parsing —
+the decoded data (ship names, positions) is highly demo-worthy but not in V2 scope.
+Classification hint: GMSK signal at 161.975 or 162.025 MHz → very likely AIS.
+
+---
+
+### 4.7 NOAA Weather Radio — 162.400–162.550 MHz (US)
+
+| Signal | Center freq | BW | Modulation | Reception | RAIL |
+|---|---|---|---|---|---|
+| NWR broadcast | 162.400/162.425/162.450/162.475/162.500/162.525/162.550 MHz | ~25 kHz | NBFM | Excellent (US only) | Phase 8 |
+
+---
+
+### 4.8 Paging — 138–174 MHz (varies by region)
+
+| Signal | Center freq | BW | Modulation | Reception | RAIL |
+|---|---|---|---|---|---|
+| POCSAG | 153.050 MHz (FR), 148–174 MHz (varies) | ~12.5 kHz | FSK 512/1200/2400 baud | Good | not planned |
+| FLEX | Similar range | ~12.5 kHz | 4-FSK | Good | not planned |
+
+**Notes**: Pager traffic (including hospital, emergency services) is FSK-modulated.
+Detection is straightforward (regular burst pattern, FSK). Decoding POCSAG requires
+an FSK demodulator + POCSAG framing parser — not in V2 scope.
+
+---
+
+### 4.9 DAB+ Digital Radio — 174–240 MHz (Europe)
+
+| Signal | Center freq | BW | Modulation | Reception | RAIL |
+|---|---|---|---|---|---|
+| DAB+ ensemble | 174–240 MHz (1.536 MHz blocks) | ~1.5 MHz | OFDM | Good (EU) | not planned |
+
+**Notes**: OFDM wideband signal. Looks like a flat-topped noise block ~1.5 MHz wide
+on the waterfall. Decoding is complex (OFDM demodulation + AAC-LC audio). Not in scope.
+Classification hint: flat-spectrum block ~1.5 MHz wide in 174–240 MHz → likely DAB+.
+
+---
+
+### 4.10 ISM 433 MHz — 433.050–434.790 MHz (EU)
+
+| Signal | Center freq | BW | Modulation | Reception | RAIL |
+|---|---|---|---|---|---|
+| OOK remotes | 433.920 MHz (most common) | 1–100 kHz | OOK/ASK | Excellent | Phase 10 |
+| FSK sensors | 433.920 MHz ± spread | 5–50 kHz | FSK | Excellent | Phase 10 |
+| LoRa IoT | 433.175/433.375/433.575 MHz | ~125/250 kHz | CSS (LoRa) | Good | not planned |
+
+**Notes**: The 433 MHz ISM band is extremely active. Every car remote, wireless weather
+station, doorbell, tire pressure sensor, and smart plug operates here. Signals are
+short bursts (OOK) or continuous FSK. Highly visible on the waterfall.
+No decoding required for detection — the bursts are unmistakable visually.
+Classification hint: short OOK burst at 433.920 MHz → very likely ISM remote/sensor.
+
+---
+
+### 4.11 PMR446 (EU) — 446.000–446.200 MHz
+
+| Signal | Center freq | BW | Modulation | Reception | RAIL |
+|---|---|---|---|---|---|
+| PMR446 voice | 446.00625–446.19375 MHz (8 ch, 25 kHz steps) | 12.5 kHz | NBFM | Excellent | Phase 8 |
+
+**Notes**: License-free walkie-talkies. Very common in warehouses, events, hiking.
+Equivalent to FRS (462–467 MHz) in the US.
+
+---
+
+### 4.12 UHF Amateur Radio (70cm) — 430–440 MHz
+
+| Signal | Center freq | BW | Modulation | Reception | RAIL |
+|---|---|---|---|---|---|
+| FM voice (repeaters) | 430–440 MHz | 12.5–25 kHz | NBFM | Excellent | Phase 8 |
+| Digital (DMR, Fusion) | Various | 12.5 kHz | Digital NBFM-like | Good | not planned |
+
+---
+
+### 4.13 ISM 868 MHz (EU) / 915 MHz (US)
+
+| Signal | Center freq | BW | Modulation | Reception | RAIL |
+|---|---|---|---|---|---|
+| LoRa IoT | 863–870 MHz (EU) | 125/250/500 kHz | CSS (LoRa) | Good | not planned |
+| Sigfox | 868.1 MHz | ~100 Hz (very narrow) | DBPSK | Good | not planned |
+| Smart meters (M-Bus) | 868.3/869.525 MHz | ~100 kHz | FSK/GFSK | Good | not planned |
+
+**Notes**: LoRa signals look like a chirp sweep on the waterfall — characteristic
+rising or falling tone sweeping the full bandwidth. Unmistakable once seen.
+Not planned for decoding in V2 but detectable (wideband digital).
+Classification hint: chirp pattern in 863–870 MHz → likely LoRa.
+
+---
+
+### 4.14 ADS-B — 1090 MHz
+
+| Signal | Center freq | BW | Modulation | Reception | RAIL |
+|---|---|---|---|---|---|
+| Mode S / ADS-B | 1090 MHz (fixed) | ~1 MHz burst | OOK pulse-position (PPM) | Good–Excellent | not planned |
+
+**Notes**: **ADS-B is the most demo-worthy signal in the entire RTL-SDR range.**
+Every commercial aircraft broadcasts its ICAO address, GPS position, altitude,
+speed, and callsign in the open (Mode S squitter). The signal is at exactly
+1090 MHz, uses OOK-PPM at 1 Mbps, and is receivable with a simple whip antenna
+over a ~200 km radius. Decoding requires bit-level OOK demodulation + Mode S
+frame parsing — well-documented (reference: dump1090) but not in V2 scope.
+Classification hint: OOK burst at 1090 MHz → unambiguous ADS-B.
+The R820T2 tuner performs adequately at 1090 MHz but sensitivity is reduced
+compared to 300–900 MHz; a filtered 1090 MHz antenna improves results significantly.
+
+---
+
+### 4.15 L-band — 1.2–1.75 GHz
+
+| Signal | Center freq | BW | Modulation | Reception | RAIL |
+|---|---|---|---|---|---|
+| GPS L1 (C/A code) | 1575.420 MHz | ~2 MHz | BPSK spread spectrum | Very weak | not planned |
+| GPS L2 | 1227.600 MHz | ~20 MHz | BPSK | Very weak | not planned |
+| Inmarsat voice | 1525–1559 MHz | varies | Various | Weak | not planned |
+
+**Notes**: GPS signals are below the noise floor without a dedicated LNA + patch
+antenna. The R820T2 is at the edge of its range here. Not actionable for RAIL.
+
+---
+
+## 5. Classification heuristics reference
+
+> **This section is the specification for Phase 10 implementation.**
+> All classifier logic in Rust must cite this section, not re-explain the rules.
+> See also DSP.md §2 (FFT/magnitude) and DSP.md §4 (demodulation) for DSP primitives.
+
+The classifier operates in two stages: **bandwidth measurement** then
+**modulation discrimination**, with a **frequency prior** applied afterward
+to produce a final label + confidence.
+
+---
+
+### 5.1 Bandwidth measurement
+
+Measure the –3 dB and –10 dB occupied bandwidth around each detected peak.
+See DSP.md §2 for the FFT/magnitude pipeline that feeds this.
+
+| Measured –3 dB BW | Initial family |
+|---|---|
+| > 150 kHz | Wideband analog or digital wideband |
+| 25–150 kHz | Narrowband analog or digital narrowband |
+| 3–25 kHz | Voice-class (AM, NBFM, SSB) |
+| < 3 kHz | SSB, CW, or very narrow digital |
+
+---
+
+### 5.2 Modulation discrimination
+
+After bandwidth bucketing, apply the following measurements:
+
+**AM vs FM discrimination**
+- Compute envelope variance of the demodulated signal (see DSP.md §5 for AM envelope).
+- FM signals: envelope is nearly constant (carrier power stays flat) → low envelope variance.
+- AM signals: envelope tracks the information → high envelope variance.
+- Threshold: if `envelope_variance > 0.15` (normalized) → AM family, else FM family.
+
+**Analog vs digital discrimination**
+- Compute the spectral flatness of the signal within its occupied bandwidth.
+- Analog voice/music: uneven spectrum, peaks at voice frequencies → flatness < 0.5.
+- Digital signals: near-flat spectrum within their bandwidth → flatness > 0.6.
+- Spectral flatness = geometric mean / arithmetic mean of spectral bins.
+
+**Wideband FM sub-class**
+- If FM family and –3 dB BW > 150 kHz → `WBFM`.
+- If FM family and –3 dB BW 5–25 kHz → `NBFM`.
+- If FM family and BW < 5 kHz → likely CW or very narrow FM.
+
+**Sideband detection (USB/LSB)**
+- SSB signals are asymmetric around center: one sideband present, other absent.
+- Compute power ratio: upper half vs lower half of occupied bandwidth.
+- If ratio > 10 dB → asymmetric → `USB` or `LSB` (sign determines which).
+
+**OOK burst detection**
+- Short duty-cycle bursts (on < 10% of time) with flat spectrum → `OOK`.
+- Measure: fraction of frames where peak power > threshold vs total frames.
+
+---
+
+### 5.3 Frequency prior (band-based lookup)
+
+Applied after modulation heuristic to adjust confidence or resolve ambiguity.
+
+| Frequency range | Most likely label | Confidence boost |
 |---|---|---|
-| MF | 300 kHz – 3 MHz | AM broadcast, maritime |
-| HF | 3 – 30 MHz | Shortwave, amateur, VOLMET |
-| VHF low | 30 – 88 MHz | Paging, military |
-| FM broadcast | 87.5 – 108 MHz | WBFM stereo radio |
-| VHF high | 108 – 174 MHz | Aviation (VOR/ILS), amateur |
-| UHF | 300 – 900 MHz | PMR446, trunked radio, ADS-B (1090 MHz*) |
-| L-band | 1 – 1.75 GHz | GPS (1575 MHz*), Inmarsat |
+| 87.5–108 MHz | `WBFM` | +high if BW > 150 kHz |
+| 108–118 MHz | `AM` | +medium (VOR/ILS) |
+| 118–137 MHz | `AM` | +high (aviation voice) |
+| 137.100 MHz ± 5 kHz | `NOAA-APT` | +high |
+| 137.620 MHz ± 5 kHz | `NOAA-APT` | +high |
+| 144–146 MHz | `NBFM` or `USB` | +medium |
+| 144.800 MHz ± 10 kHz | `APRS` | +high if digital |
+| 156–174 MHz | `NBFM` | +high (maritime) |
+| 161.975 MHz ± 5 kHz | `AIS` | +high if digital |
+| 162.025 MHz ± 5 kHz | `AIS` | +high if digital |
+| 433.920 MHz ± 200 kHz | `OOK` | +high if burst |
+| 446 MHz ± 100 kHz | `NBFM` | +high (PMR446) |
+| 1090 MHz ± 500 kHz | `ADS-B` | +high if OOK burst |
 
-*Note: 1090 MHz (ADS-B) and 1575 MHz (GPS L1) are near or above the reliable
-range of most RTL-SDR + R820T2 setups. Reception is possible but not guaranteed.
-Do not design features that depend on these without hardware verification.
+---
 
-**Priority for V1 demos**: FM broadcast band (87.5–108 MHz).
-Signals are strong, demodulation is well-understood, and results are immediately
-audible — best for showcasing the tool without specialized knowledge.
+### 5.4 Classifier output contract
+
+The Rust DSP task must emit a structured suggestion on each analysis cycle.
+IPC: JSON Tauri event (not binary — one event per analysis cycle, low rate).
+
+```json
+{
+  "label": "WBFM",
+  "confidence": "high",
+  "reason": "BW=196kHz, FM envelope, frequency prior 87.5–108MHz"
+}
+```
+
+`confidence` values: `"high"` | `"medium"` | `"low"` | `"none"`.
+`reason` is a human-readable string for display in the UI tooltip.
+
+**Rule**: when `confidence == "none"`, emit `label: "unknown"` and do not
+auto-apply any mode suggestion. The UI badge must not show anything in this case.
+
+---
+
+### 5.5 Signals deferred beyond V2
+
+The following signals are detectable with RTL-SDR but require protocol-specific
+decoders beyond RAIL's V2 scope. Do not implement decoders for these in Phases 7–11.
+They are listed here so that Phase 10 classification can correctly label them
+without attempting to decode them.
+
+| Signal | Why deferred |
+|---|---|
+| ADS-B (full decode) | Requires Mode S bit parser, ICAO database |
+| AIS (full decode) | Requires GMSK demod + NMEA parser |
+| APRS (full decode) | Requires AX.25 demod + APRS parser |
+| DAB+ | Requires OFDM + AAC-LC decoder |
+| LoRa | Requires CSS demodulation, proprietary framing |
+| POCSAG | Requires FSK demod + POCSAG frame parser |
+| RDS | Requires 57 kHz subcarrier demod + BPSK |
+| NOAA APT (image) | Requires 2400 Hz tone sync + image reconstruction |
+| GPS | Below noise floor, requires LNA + patch antenna |

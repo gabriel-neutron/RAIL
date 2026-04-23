@@ -1,5 +1,18 @@
 # PRD — RAIL: Radio Analysis and Intel Lab
 
+## Table of contents
+1. [Product summary](#1-product-summary)
+2. [Goals](#2-goals)
+3. [Target users](#3-target-users)
+4. [V1 feature requirements](#4-v1-feature-requirements)
+5. [Technical requirements](#5-technical-requirements)
+6. [Architecture principles](#6-architecture-principles)
+7. [Quality requirements](#7-quality-requirements)
+8. [Success criteria](#8-success-criteria)
+9. [Out of scope clarifications](#9-out-of-scope-clarifications)
+
+---
+
 ## 1. Product summary
 
 RAIL is a Tauri desktop application for RTL-SDR reception and signal analysis.
@@ -20,11 +33,15 @@ signal intelligence — not just casual listening.
 - Structured capture: IQ clips, audio, sessions with metadata
 - Modern UI that replaces WebSDR-style dense layouts
 
-### Secondary (V2)
-- Wideband scanning and band occupancy view
-- Automatic channel detection
-- Signal classification (modulation family)
-- Capture comparison and recurring channel tracking
+### Secondary (V2 — Phases 7–11)
+- **Phase 7**: Code compliance + first public release (v0.1.0 GitHub release with installers)
+- **Phase 8**: Demodulation expansion — NFM, USB, LSB; opens aviation, maritime, ham radio, PMR446
+- **Phase 9**: Wideband scanner — sweep a frequency range, auto-discover active signals
+- **Phase 10**: Signal intelligence — auto-classify signals (bandwidth + modulation + frequency prior);
+  emit suggested demodulation mode with confidence score
+- **Phase 11**: Guided navigation — band shortcuts, suggested-mode auto-apply, waterfall export with label
+
+Signal reference for Phase 10: see `docs/SIGNALS.md` §4–5.
 
 ### Non-goals (explicitly excluded)
 - Remote SDR / network SDR hosting
@@ -142,8 +159,9 @@ Full architecture: see `/docs/ARCHITECTURE.md`.
 
 ### V2 is successful when
 - User scans a band without manually tuning each frequency
-- App highlights candidate active channels
-- User compares two captures of the same frequency across time
+- App highlights active channels and suggests the correct demodulation mode
+- A first-time user clicks a band shortcut and hears audio without reading docs
+- A recruiter looking at the app understands what it does within 10 seconds
 
 ---
 

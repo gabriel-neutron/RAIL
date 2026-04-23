@@ -4,136 +4,149 @@
 > Each phase must be fully working and committed before starting the next.
 > Claude Code builds one phase at a time. Do not jump ahead.
 
----
-
-## Phase 0 — Project scaffold and prerequisites
-
-**Goal**: verified, buildable empty project. Nothing ships until this is green.
-
-- [x] Tauri v2 project initialized (`create-tauri-app`)
-- [x] Rust toolchain verified (`cargo build` passes)
-- [x] React + TypeScript frontend initialized
-- [x] `rtlsdr-rs` or raw FFI dependency added and compiled
-- [x] RTL-SDR device detected and opened in Rust (log device info)
-- [x] librtlsdr installed and linked on host platform
-- [x] Basic Tauri command (`ping` → `pong`) working end-to-end
-- [x] `rustfft` dependency added
-- [x] `zustand` added to frontend
-- [x] `/docs/` folder structure in place
-- [x] `CLAUDE.md` and all docs committed
-
-**Exit criterion**: `cargo tauri dev` launches, RTL-SDR is detected, ping command works.
+## Table of contents
+1. [Phase 0 — Project scaffold](#phase-0--project-scaffold-and-prerequisites-)
+2. [Phase 1 — IQ stream and waterfall](#phase-1--iq-stream-and-waterfall-)
+3. [Phase 2 — Frequency control and tuning](#phase-2--frequency-control-and-tuning-)
+4. [Phase 3 — Demodulation and audio](#phase-3--demodulation-and-audio-)
+5. [Phase 4 — Signal meter and UI polish](#phase-4--signal-meter-and-ui-polish-)
+6. [Phase 5 — Capture and session system](#phase-5--capture-and-session-system-)
+7. [Phase 6 — V1 hardening](#phase-6--v1-hardening-)
+8. [Phase 7 — Code compliance and first release](#phase-7--code-compliance-and-first-release)
+9. [Phase 8 — Demodulation expansion](#phase-8--demodulation-expansion)
+10. [Phase 9 — Wideband scanner](#phase-9--wideband-scanner)
+11. [Phase 10 — Signal intelligence layer](#phase-10--signal-intelligence-layer)
+12. [Phase 11 — Polish and guided navigation](#phase-11--polish-and-guided-navigation)
 
 ---
 
-## Phase 1 — IQ stream and waterfall
+## Phase 0 — Project scaffold and prerequisites ✓
 
-**Goal**: live waterfall visible in the UI from real hardware.
+## Phase 1 — IQ stream and waterfall ✓
 
-- [x] RTL-SDR async stream running in Rust (raw IQ bytes flowing)
-- [x] IQ conversion: u8 → f32 complex (see HARDWARE.md §1)
-- [x] FFT pipeline: Hann window → rustfft → magnitude → dB → FFT shift (see DSP.md §2–3)
-- [x] Binary Tauri event emitting float32 waterfall frames
-- [x] React canvas component receiving float32 ArrayBuffer
-- [x] Colormap applied (dB → RGB, 6-stop gradient)
-- [x] Waterfall scrolls downward at ~25 fps
-- [x] Frequency display showing current center frequency
-- [x] Gain control (auto/manual) wired to hardware
+## Phase 2 — Frequency control and tuning ✓
 
-**Exit criterion**: open app, see live waterfall scrolling with real spectrum data.
+## Phase 3 — Demodulation and audio ✓
+
+## Phase 4 — Signal meter and UI polish ✓
+
+## Phase 5 — Capture and session system ✓
+
+## Phase 6 — V1 hardening ✓
 
 ---
 
-## Phase 2 — Frequency control and tuning
+## Phase 7 — Code compliance and first release ✓
 
-**Goal**: user can tune to any frequency and see the waterfall update.
+**Goal**: close the gap between Phase 6 checklist and actual state; ship v0.1.0 to GitHub.
 
-- [x] Frequency input box (numeric, Hz/kHz/MHz toggle)
-- [x] Step buttons (1 Hz, 1 kHz, 10 kHz, 100 kHz steps)
-- [x] Click-to-tune on waterfall canvas (map pixel X → frequency offset)
-- [x] Keyboard shortcuts (arrow keys for step tuning)
-- [x] Bookmark system (save/load named frequencies)
-- [x] DC offset handling (center freq offset — see DSP.md §1)
-- [x] PPM correction setting exposed in UI
+- [x] Replace all non-test `unwrap()` calls in DSP modules with `.expect("reason")`
+      or `?` propagation — files: `dsp/am.rs`, `dsp/fft.rs`, `dsp/filter.rs`, `dsp/waterfall.rs`
+- [x] Add table of contents to `docs/TECH_STACK.md` (183 lines, rule: >~150 lines requires TOC)
+- [x] Add table of contents to `docs/PRD.md` (155 lines, rule: >~150 lines requires TOC)
+- [x] Add quick-start section to `README.md`: prerequisites + install command + run command
+- [x] Add `LICENSE` file (MIT)
+- [x] `git tag v0.1.0 && git push origin v0.1.0`
+      → GitHub Actions `release.yml` builds all installers and publishes the release automatically
 
-**Exit criterion**: click on a signal in the waterfall, frequency updates, waterfall recenters.
-
----
-
-## Phase 3 — Demodulation and audio
-
-**Goal**: user can listen to FM and AM signals.
-
-- [x] FM demodulation implemented in Rust (see DSP.md §4)
-- [x] AM demodulation implemented in Rust (see DSP.md §5)
-- [x] Decimation chain to 44100 Hz audio (see DSP.md §4)
-- [x] De-emphasis filter for WBFM (see DSP.md §4)
-- [x] PCM audio streamed via binary Tauri event
-- [x] Web Audio API playback in React (AudioContext)
-- [x] Mode selector buttons: FM / AM (USB/LSB stubbed for V1.1)
-- [x] Volume slider and mute toggle
-- [x] Filter bandwidth control (affects demodulation bandwidth)
-- [x] Squelch control (silence below threshold dBm)
-
-**Exit criterion**: tune to 87.5–108 MHz FM station, hear music clearly.
+**Exit criterion**: GitHub release page exists at `releases/tag/v0.1.0`,
+`.exe` installer is downloadable, CI is green on the tag.
 
 ---
 
-## Phase 4 — Signal meter and UI polish
+## Phase 8 — Demodulation expansion
 
-**Goal**: professional-looking UI with signal strength display.
+**Goal**: user can demodulate narrow FM, upper and lower sideband signals —
+opening aviation repeaters, maritime voice, PMR446, and ham radio SSB.
 
-- [X] Signal meter: current dBm + peak hold (see DSP.md §2)
-- [X] Waterfall zoom (adjust displayed frequency span)
-- [X] Spectrum view above waterfall (magnitude curve)
-- [X] Filter width visualization on waterfall (shaded region)
-- [X] UI layout finalized: controls panel, waterfall pane, meter
-- [X] Dark theme (SDR tools are always dark)
-- [X] Responsive layout (minimum 1280px width target)
-- [X] Device status indicator (connected / disconnected)
-- [X] Error handling: device disconnect handled gracefully
+- [ ] NFM demodulation (narrow FM): FM discriminator with 12.5 kHz filter
+      — same FM math as WBFM but with a narrower channel filter; see DSP.md §4
+- [ ] De-emphasis for NFM (300–3000 Hz voice shelf, not the 50/75 µs WBFM curve)
+- [ ] USB demodulation (upper sideband SSB): analytic signal shift + filter; see DSP.md §4
+- [ ] LSB demodulation (lower sideband SSB): mirror of USB
+- [ ] Mode selector updated: `WBFM | NFM | AM | USB | LSB`
+- [ ] Filter bandwidth presets per mode:
+      WBFM → 200 kHz, NFM → 12.5 kHz, AM → 10 kHz, USB/LSB → 3 kHz
+- [ ] Squelch threshold recalibrated for NFM noise floor (different from WBFM)
 
-**Exit criterion**: app looks like a real tool. Screenshot-worthy.
-
----
-
-## Phase 5 — Capture and session system
-
-**Goal**: user can save and revisit captures.
-
-- [X] Audio recording (WAV, PCM float32, 44100 Hz)
-- [X] Waterfall screenshot (PNG)
-- [X] IQ clip capture (SigMF format — see SIGNALS.md §1)
-- [X] Open/play back audio recording
-
-**Exit criterion**: capture a signal, close app, reopen, find the session, play it back.
+**Exit criterion**: tune to 156.800 MHz (maritime VHF channel 16), select NFM,
+hear voice or carrier. Tune to 144.200 MHz (2m SSB calling), select USB, hear SSB voice.
 
 ---
 
-## Phase 6 — V1 hardening and GitHub release
+## Phase 9 — Wideband scanner
 
-**Goal**: public-ready V1.0 on GitHub.
+**Goal**: user can sweep a frequency range and auto-discover active signals
+without manually stepping through frequencies.
 
-- [X] README.md with screenshots and demo GIF
-- [X] Installation instructions for Linux, macOS, Windows
-- [X] Platform-specific driver notes (udev rules, Zadig)
-- [X] `CONTRIBUTING.md` (brief, since solo project)
-- [X] GitHub Actions CI (cargo build + clippy)
-- [X] GitHub release with binary artifacts (Tauri produces installers)
-- [X] All `clippy` warnings resolved
-- [X] No `unwrap()` in non-test code
-- [X] All `/docs/` files reviewed and accurate
+- [ ] Scanner engine in Rust: configurable start freq, stop freq, step size, dwell time
+- [ ] Sequential tuning loop: `tune → wait dwell → measure peak power → advance`
+- [ ] Scan-stop condition: peak power exceeds squelch threshold during dwell
+- [ ] Sweep result emitted as a float32 power-per-step array via binary Tauri event
+- [ ] Band activity canvas in React: horizontal bar showing power across scanned range,
+      same colormap as waterfall
+- [ ] Active-signal markers overlaid on band activity (vertical lines at peaks)
+- [ ] User controls: start/stop, step size (default = current BW ≈ 2.4 MHz),
+      dwell time (default 200 ms), scan range input
+- [ ] Click-to-tune on band activity canvas: clicking a marker tunes the main receiver
 
-**Exit criterion**: a stranger can clone, install, and use the app following the README.
+**Exit criterion**: scanner sweeps 87–108 MHz in 200 kHz steps,
+the band activity canvas fills with power levels, active FM stations appear as peaks,
+clicking a peak tunes the receiver and the waterfall updates.
 
 ---
 
-## Phase 7 — V2 analysis features (post-V1)
+## Phase 10 — Signal intelligence layer
 
-Scope defined after V1 is shipped. Do not plan implementation details now.
+> **Prerequisite**: read `docs/SIGNALS.md` §4 (receivable signal reference by band)
+> and §5 (classification heuristics) in full before writing any detection or
+> classification code. All classifier logic must cite SIGNALS.md §5, not restate it.
 
-- Channel detection (peak finding in spectrum)
-- Wideband scanning (sweep + stitch waterfall)
-- Signal classification (first-pass modulation labeling)
-- Capture comparison view
-- Signal annotation and tagging system
+**Goal**: the app detects, measures, and classifies signals automatically —
+emitting a structured suggestion the UI can display without the user selecting a mode.
+
+- [ ] Peak detector in Rust: find local maxima in FFT magnitude above estimated noise floor
+      — see DSP.md §2 for magnitude pipeline
+- [ ] Bandwidth estimator: measure –3 dB and –10 dB width around each detected peak
+- [ ] Envelope variance measurement: discriminate AM from FM family
+      — see SIGNALS.md §5.2 and DSP.md §4–5 for signal math
+- [ ] Spectral flatness measurement: discriminate analog from digital signals
+      — see SIGNALS.md §5.2
+- [ ] Frequency prior lookup: match current center frequency against band table
+      in SIGNALS.md §5.3
+- [ ] Combine heuristic result + frequency prior into confidence-scored label
+- [ ] Output contract: emit `{label, confidence, reason}` per SIGNALS.md §5.4
+      as a low-rate JSON Tauri event (not binary)
+- [ ] Frontend: "Suggested mode" badge near mode selector
+      — shows label and confidence, tooltip shows `reason`
+      — badge is display only; does not change the active mode automatically
+
+**Exit criterion**: tune to 98 MHz without selecting a mode — badge reads
+`WBFM — high confidence`. Tune to 156.800 MHz — badge reads `NBFM — high confidence`.
+Tune to blank noise — badge reads nothing or `unknown`.
+
+---
+
+## Phase 11 — Polish and guided navigation
+
+**Goal**: tie signal intelligence into navigation UX; lower the barrier for
+first-time users; complete the portfolio-ready state of the app.
+
+- [ ] Band quick-access shortcuts: clickable entries for FM Broadcast, Aviation,
+      Maritime VHF, 2m Amateur, ISM 433, PMR446 — each jump sets center frequency
+      and optionally triggers a quick scan (±10 MHz around band center)
+- [ ] Suggested mode auto-apply: opt-in toggle in settings — when enabled, the
+      classifier output from Phase 10 automatically selects the demodulation mode
+      on each retune; disabled by default
+- [ ] `signal_type_guess` in session schema auto-populated from classifier output
+      at capture time — see SIGNALS.md §2 schema field
+- [ ] Waterfall export: PNG with frequency axis, center frequency, timestamp,
+      and classifier label burned into the image header area
+- [ ] Keyboard shortcut to trigger a quick scan of ±10 MHz around current frequency
+- [ ] First-use onboarding hint: one-time overlay pointing to the band shortcuts
+      and suggested mode badge
+
+**Exit criterion**: a user who has never used SDR software opens the app,
+clicks "FM Broadcast" in the band shortcuts, the app tunes to 98 MHz,
+the suggested mode badge shows `WBFM`, and (if auto-apply is on) FM audio starts
+— without reading any documentation.

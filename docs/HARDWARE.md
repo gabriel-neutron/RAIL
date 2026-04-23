@@ -1,58 +1,75 @@
-# HARDWARE.md — RTL-SDR Hardware Reference
+# RTL-SDR Hardware Reference
 
 ## Table of contents
-1. [RTL-SDR fundamentals](#1-rtl-sdr-fundamentals)
-2. [librtlsdr binding strategy](#2-librtlsdr-binding-strategy)
-3. [Device configuration parameters](#3-device-configuration-parameters)
-4. [Sampling and tuning constraints](#4-sampling-and-tuning-constraints)
-5. [Gain control](#5-gain-control)
-6. [Known hardware issues](#6-known-hardware-issues)
+1. RTL-SDR fundamentals
+2. librtlsdr binding strategy
+3. Device configuration parameters
+4. Sampling and tuning constraints
+5. Gain control
+6. Known hardware issues
 
 ---
 
 ## 1. RTL-SDR fundamentals
 
-The RTL-SDR is based on the **Realtek RTL2832U** chip paired with a tuner
-(most commonly R820T/R820T2). It functions as a direct-sampling or
-quadrature-sampling USB SDR receiver.
+The NESDR SMArt v5 is based on the Realtek RTL2832U demodulator/USB interface IC paired with the R820T2/R860 tuner IC. It operates in two modes depending on the target frequency:
 
-**Supported frequency range**: 500 kHz – 1.75 GHz (with R820T2 tuner).
-Below 500 kHz requires direct-sampling mode (hardware mod or specific dongles).
+- **Quadrature (IQ) sampling mode**: 25 MHz – 1.75 GHz (standard operation)
+- **Direct sampling mode**: 100 kHz – 25 MHz (HF reception, built-in, no hardware mod required)
 
-**ADC resolution**: 8-bit (256 levels per I and Q channel).
-This limits dynamic range to approximately 48 dB theoretically.
-Practical dynamic range: ~50–60 dB depending on gain settings.
+**Key hardware characteristics:**
 
-**Output format**: interleaved 8-bit unsigned integers.
-Conversion to complex float: `I = (raw_I / 127.5) - 1.0`, same for Q.
-Range after conversion: `[-1.0, 1.0]`.
+| Parameter | Value |
+|---|---|
+| Frequency range | 100 kHz – 1.75 GHz |
+| Demodulator IC | RTL2832U |
+| Tuner IC | R820T2 / R860 |
+| ADC resolution | 7-bit (128 levels per I and Q channel) |
+| TCXO stability | 0.5 PPM (ultra-low phase noise) |
+| Antenna input | Female SMA, 50 Ω |
+| USB interface | USB Type-A |
+| Enclosure | Black brushed aluminum with integrated custom heatsink |
+| Certifications | FCC, CE, IC |
+
+**ADC and dynamic range:**
+
+The RTL2832U uses a 7-bit ADC (128 levels per I and Q channel). This limits theoretical dynamic range to approximately 42 dB. Practical dynamic range is 50–60 dB depending on gain settings and environmental conditions.
+
+Output format: interleaved 8-bit unsigned integers (zero-padded from the 7-bit ADC).
+Conversion to complex float: `I = (raw_I / 127.5) - 1.0`, same for Q. Range after conversion: `[-1.0, 1.0]`.
+
+**Improvements over RTL-SDR v3:**
+- HF SNR improved by up to 15 dB
+- VHF & UHF SNR improved by up to 6 dB
+- Tuning accuracy improved by an average of 4×
+- Frequency range extended down to 100 kHz via native direct sampling
 
 ---
 
 ## 2. librtlsdr binding strategy
 
-**Approach**: direct FFI binding via `rtlsdr-rs` crate or raw `unsafe` FFI.
-Do NOT use `rtl_tcp` daemon — see `CLAUDE.md` for rationale.
+Approach: direct FFI binding via `rtlsdr-rs` crate or raw unsafe FFI. Do NOT use rtltcp daemon (see `CLAUDE.md` for rationale).
 
-**Crate**: use `rtlsdr-rs` as primary. If it lacks needed features,
-fall back to raw `librtlsdr` FFI using the C header directly.
+Crate: use `rtlsdr-rs` as primary. If it lacks needed features, fall back to raw `librtlsdr` FFI using the C header directly.
 
-**Initialization sequence**:
-```
-1. rtlsdr_get_device_count() → verify at least 1 device
-2. rtlsdr_open(&dev, device_index) → open handle
-3. rtlsdr_set_sample_rate(dev, sample_rate)
-4. rtlsdr_set_center_freq(dev, center_freq_hz)
-5. rtlsdr_set_tuner_gain_mode(dev, 0) → 0=auto, 1=manual
-6. rtlsdr_reset_buffer(dev) → mandatory before streaming
-7. rtlsdr_read_async(dev, callback, ctx, 0, buffer_size) → start stream
-```
+**Initialization sequence:**
+1. `rtlsdr_get_device_count()` — verify at least 1 device
+2. `rtlsdr_open(&dev, device_index)` — open handle
+3. `rtlsdr_set_sample_rate(dev, sample_rate)` — set sample rate
+4. `rtlsdr_set_center_freq(dev, center_freq_hz)` — set center frequency
+5. `rtlsdr_set_tuner_gain_mode(dev, 0)` — 0 = auto, 1 = manual
+6. `rtlsdr_reset_buffer(dev)` — **mandatory** before streaming
+7. `rtlsdr_read_async(dev, callback, ctx, 0, buffer_size)` — start stream
 
-**Shutdown sequence**:
-```
-1. rtlsdr_cancel_async(dev) → signal callback to stop
-2. rtlsdr_close(dev) → release handle
-```
+**For HF (below 25 MHz) — direct sampling mode:**
+- Call `rtlsdr_set_direct_sampling(dev, 2)` after open, before streaming
+  - Value `1` = I-branch, `2` = Q-branch (Q-branch recommended for NESDR SMArt v5)
+- Disable tuner gain: `rtlsdr_set_tuner_gain_mode(dev, 0)`
+- Note: tuner gain has no effect in direct sampling mode
+
+**Shutdown sequence:**
+1. `rtlsdr_cancel_async(dev)` — signal callback to stop
+2. `rtlsdr_close(dev)` — release handle
 
 ---
 
@@ -61,14 +78,20 @@ fall back to raw `librtlsdr` FFI using the C header directly.
 | Parameter | Recommended default | Notes |
 |---|---|---|
 | Sample rate | 2.048 MHz | Stable, good bandwidth |
-| Center frequency | User-set | Offset by fs/4 from signal — see DSP.md §1 |
-| Buffer size | 16384 bytes (16 KB) | ~8ms at 2.048 MHz |
+| Center frequency | User-set | Offset by fs/4 from signal (see `DSP.md`) |
+| Buffer size | 16384 bytes (16 KB) | 8ms at 2.048 MHz |
 | Tuner gain mode | Auto (0) | Expose manual override in UI |
-| PPM correction | 0 | Expose as user setting for calibration |
-| Direct sampling | Off | Only needed for HF below 500 kHz |
+| PPM correction | 0 | 0.5 PPM TCXO — very stable; expose as user setting for fine calibration |
+| Direct sampling | Off (quadrature) | Set to Q-branch (2) for HF below 25 MHz |
 
-**Buffer size formula**: `buf_size = sample_rate × bytes_per_sample × duration_s`
-At 2.048 MHz, 2 bytes/sample (I+Q), 8ms: `2048000 × 2 × 0.008 = 32768 bytes`.
+**Buffer size formula:**
+
+```
+buf_size = sample_rate × bytes_per_sample × duration_s
+```
+
+At 2.048 MHz, 2 bytes/sample (IQ), 8 ms:
+`2,048,000 × 2 × 0.008 = 32,768 bytes`
 
 ---
 
@@ -76,40 +99,48 @@ At 2.048 MHz, 2 bytes/sample (I+Q), 8ms: `2048000 × 2 × 0.008 = 32768 bytes`.
 
 **Stable sample rates** (avoid rates that cause dropped samples):
 - 225 kHz, 900 kHz, 1.024 MHz, 1.4 MHz, 1.8 MHz
-- **2.048 MHz** ← recommended default
-- 2.4 MHz ← maximum stable on most hardware
-- Above 3.2 MHz: expect dropped samples
+- **2.048 MHz** — recommended default
+- 2.4 MHz — maximum stable on most hardware
+- Above 3.2 MHz — expect dropped samples (3.2 MSPS is the hardware ceiling)
 
-**Tuning resolution**: RTL-SDR tunes in steps. Actual center frequency
-may differ slightly from requested. Always read back:
-`actual_freq = rtlsdr_get_center_freq(dev)`
+**Tuning resolution:**
+The RTL-SDR tunes in discrete steps. The actual center frequency may differ slightly from the requested value. Always read back: `actual_freq = rtlsdr_get_center_freq(dev)`.
 
-**Minimum tunable frequency**: ~500 kHz with standard R820T2.
-Below this requires direct-sampling mode (not in V1 scope).
+**Frequency range by mode:**
 
-**Maximum stable frequency**: ~1.75 GHz with R820T2.
-Above 1.1 GHz: expect increased phase noise.
+| Mode | Range | Notes |
+|---|---|---|
+| Quadrature (IQ) | 25 MHz – 1.75 GHz | Standard mode |
+| Direct sampling (Q-branch) | 100 kHz – 25 MHz | Native on v5, no hardware mod required |
+
+Above 1.1 GHz expect increased phase noise.
+
+**HF note:** Although direct sampling on the NESDR SMArt v5 is significantly better than other RTL-SDRs (up to +15 dB HF SNR), using an upconverter is still recommended for demanding HF work to avoid the DC spike and alias artifacts inherent to direct sampling.
 
 ---
 
 ## 5. Gain control
 
-RTL-SDR exposes two gain stages:
-1. **Tuner gain** (RF amplifier, R820T2) — main control, in tenths of dB
-2. **IF gain** (RTL2832U digital gain) — secondary, rarely needed
+The NESDR SMArt v5 exposes two gain stages:
 
-**Auto gain**: hardware AGC. Good for general use, may compress strong signals.
+1. **Tuner gain** — R820T2/R860 RF amplifier. Main control, expressed in tenths of dB.
+2. **IF gain** — RTL2832U digital gain. Secondary stage, rarely needed.
 
-**Manual gain**: `rtlsdr_set_tuner_gain(dev, gain_tenths_db)`
-Available gain steps are hardware-specific. Query with:
-`rtlsdr_get_tuner_gains(dev, gains_array)`
+**Gain range:** 0 to 49.6 dB (in discrete steps, hardware-specific).
 
-**Typical gain range**: 0 to ~50 dB in discrete steps (~1–2 dB per step).
-
-**Gain strategy for UI**:
-- Default: auto
+**Gain strategy for UI:**
+- Default: auto (AGC)
 - Manual: expose dB slider using queried gain steps
 - Warn user if signal appears clipped (ADC saturation)
+- Note: in direct sampling mode (HF), tuner gain has no effect — IF gain or AGC applies
+
+**Querying available gain steps:**
+```rust
+rtlsdr_get_tuner_gains(dev, &mut gains_array)
+```
+Typical step resolution: ~1–2 dB increments across the 0–49.6 dB range.
+
+**Auto gain:** suitable for general use; may compress strong signals in dense RF environments. Prefer manual gain when doing signal level measurements or decoding weak signals.
 
 ---
 
@@ -119,13 +150,18 @@ Available gain steps are hardware-specific. Query with:
 |---|---|---|
 | Device not found | Driver conflict (Windows) | Require Zadig WinUSB driver install |
 | USB drops at high sample rate | USB 2.0 bandwidth limit | Cap at 2.4 MHz |
-| Frequency drift | Cheap oscillator, temperature | Expose PPM correction setting |
-| DC spike at center | LO leakage (RTL2832U) | Offset center freq — see DSP.md §1 |
-| Gain steps not found | Device index wrong | Always query `get_device_count` first |
+| Frequency drift | Minimal — 0.5 PPM TCXO | Expose PPM correction setting for fine-tuning |
+| DC spike at center | LO leakage, RTL2832U | Offset center freq (see `DSP.md`) |
+| Gain steps not found | Device index wrong | Always query `get_device_count()` first |
 | Callback not called | `reset_buffer` skipped | Always call before `read_async` |
 | Click/pop on start | Buffer not primed | Discard first 2–3 buffers |
+| HF alias artifacts | Direct sampling architecture | Use upconverter for critical HF work |
+| Weak HF signal | Direct sampling requires matched antenna | Use a long-wire antenna or DIY dipole for HF; a 1:9 balun (e.g. Balun One Nine) is strongly recommended |
 
-**Platform notes**:
-- Linux: requires `rtlsdr` udev rules or running as root
-- macOS: librtlsdr installable via Homebrew
-- Windows: requires Zadig to replace default driver with WinUSB
+**Platform notes:**
+
+| Platform | Requirement |
+|---|---|
+| Linux | Requires `rtlsdr` udev rules or running as root |
+| macOS | `librtlsdr` installable via Homebrew |
+| Windows | Requires Zadig to replace default driver with WinUSB |

@@ -1,5 +1,15 @@
 # TECH_STACK.md — Technology Stack Reference
 
+## Table of contents
+1. [Stack overview](#1-stack-overview)
+2. [Rust dependencies](#2-rust-dependencies)
+3. [Frontend dependencies](#3-frontend-dependencies)
+4. [Platform prerequisites](#4-platform-prerequisites)
+5. [Build commands](#5-build-commands)
+6. [Key architecture decisions and rationale](#6-key-architecture-decisions-and-rationale)
+
+---
+
 ## 1. Stack overview
 
 | Layer | Technology | Version | Rationale |
