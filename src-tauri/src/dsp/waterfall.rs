@@ -22,6 +22,10 @@ const BYTE_TO_FLOAT_SCALE: f32 = 1.0 / 127.5;
 /// Convert interleaved RTL-SDR u8 samples (I,Q,I,Q,…) into complex floats.
 ///
 /// `raw` length must be `2 × out.len()`. See `docs/HARDWARE.md` §1.
+///
+/// librtlsdr already compensates for the R820T IF spectrum inversion
+/// inside the RTL2832U demod, so the IQ stream reaching us is upright —
+/// no software conjugation is needed here.
 pub fn iq_u8_to_complex(raw: &[u8], out: &mut [Complex<f32>]) -> Result<(), RailError> {
     if raw.len() != out.len() * 2 {
         return Err(RailError::DspError(format!(
@@ -189,5 +193,55 @@ mod tests {
         let mut out = vec![Complex::new(0.0, 0.0); 4];
         let err = iq_u8_to_complex(&[0u8; 2], &mut out);
         assert!(err.is_err());
+    }
+
+    /// Full-pipeline round-trip against a synthetic upright-R820T signal.
+    ///
+    /// librtlsdr returns upright IQ (α = +1). Simulates a carrier at
+    /// baseband offset `u = +600/2048 · fs` above the user-tuned center
+    /// `fc`, with LO parked at `fc − fs/4` (δ = −fs/4). Builds the IQ
+    /// bytes the hardware would emit, runs them through
+    /// `iq_u8_to_complex` → `apply_fs4_shift` → FFT → `fft_shift`, and
+    /// asserts the peak lands at bin `N/2 + u_bins` (correct display),
+    /// not at the mirror bin `N/2 − u_bins`.
+    #[test]
+    fn pipeline_round_trip_upright_tuner() {
+        const N: usize = 2048;
+        const U_BINS: i32 = 600;
+        const DELTA_BINS: i32 = -(N as i32) / 4; // -512
+
+        // Analog-mixer output frequency relative to fs: +1·(u − δ) = 1112.
+        let analog_bin = (U_BINS - DELTA_BINS) as f32;
+        let two_pi = 2.0 * std::f32::consts::PI;
+
+        let mut raw = Vec::<u8>::with_capacity(2 * N);
+        for k in 0..N {
+            let phase = two_pi * analog_bin * (k as f32) / (N as f32);
+            let (sin, cos) = phase.sin_cos();
+            let i_byte = (((cos + 1.0) * 127.5).round() as i32).clamp(0, 255) as u8;
+            let q_byte = (((sin + 1.0) * 127.5).round() as i32).clamp(0, 255) as u8;
+            raw.push(i_byte);
+            raw.push(q_byte);
+        }
+
+        let mut iq = vec![Complex::new(0.0_f32, 0.0); N];
+        iq_u8_to_complex(&raw, &mut iq).unwrap();
+        apply_fs4_shift(&mut iq, 0);
+        let mut fft = crate::dsp::fft::FftProcessor::new(N);
+        let spectrum = fft.process(&iq);
+        let peak_bin = spectrum
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .map(|(i, _)| i)
+            .unwrap();
+
+        let correct_bin = ((N as i32) / 2 + U_BINS) as usize;
+        let mirror_bin = ((N as i32) / 2 - U_BINS) as usize;
+        assert_eq!(
+            peak_bin, correct_bin,
+            "upright-tuner pipeline should put the signal at bin {correct_bin}, got {peak_bin} \
+             (mirror would be {mirror_bin})"
+        );
     }
 }

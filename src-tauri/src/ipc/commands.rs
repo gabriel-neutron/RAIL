@@ -35,6 +35,10 @@ type _DemodChainMarker = DemodChain;
 
 /// Default RTL-SDR sample rate. Stable per `docs/HARDWARE.md` §4.
 const DEFAULT_SAMPLE_RATE_HZ: u32 = 2_048_000;
+/// Fallback sample rates to probe if the requested one is rejected by
+/// librtlsdr on a specific tuner/driver combo (`set_sample_rate -> -1`).
+/// Ordered by preference.
+const FALLBACK_SAMPLE_RATES_HZ: [u32; 5] = [2_048_000, 1_800_000, 1_400_000, 1_024_000, 900_000];
 
 /// Mode names accepted over the wire. Kept in sync with
 /// `src/store/radio.ts :: DemodMode`.
@@ -116,6 +120,17 @@ fn lo_offset_hz(sample_rate_hz: u32) -> u32 {
     sample_rate_hz / 4
 }
 
+fn sample_rate_candidates(requested_hz: u32) -> Vec<u32> {
+    let mut out = Vec::with_capacity(FALLBACK_SAMPLE_RATES_HZ.len() + 1);
+    out.push(requested_hz);
+    for hz in FALLBACK_SAMPLE_RATES_HZ {
+        if hz != requested_hz {
+            out.push(hz);
+        }
+    }
+    out
+}
+
 /// Global, single-session state.
 #[derive(Default)]
 pub struct AppState {
@@ -179,19 +194,43 @@ pub async fn start_stream<R: Runtime>(
         return Err(RailError::InvalidParameter("stream already running".into()));
     }
 
-    let sample_rate = args.sample_rate_hz.unwrap_or(DEFAULT_SAMPLE_RATE_HZ);
-    let offset = lo_offset_hz(sample_rate);
+    let requested_sample_rate_hz = args.sample_rate_hz.unwrap_or(DEFAULT_SAMPLE_RATE_HZ);
 
     let device = RtlSdrDevice::open(0)?;
-    device.set_sample_rate(sample_rate)?;
-    // Park the LO `fs/4` above the user's target so the DC spike sits
-    // off-center after the DSP mixer (docs/DSP.md §1).
-    device.set_center_freq(args.frequency_hz.saturating_add(offset))?;
+    let mut applied_sample_rate_hz = None;
+    let mut sample_rate_errors: Vec<String> = Vec::new();
+    for candidate_hz in sample_rate_candidates(requested_sample_rate_hz) {
+        match device.set_sample_rate(candidate_hz) {
+            Ok(()) => {
+                applied_sample_rate_hz = Some(candidate_hz);
+                break;
+            }
+            Err(e) => sample_rate_errors.push(format!("{candidate_hz}: {e}")),
+        }
+    }
+    let sample_rate = applied_sample_rate_hz.ok_or_else(|| {
+        RailError::StreamError(format!(
+            "failed to set sample rate (requested {requested_sample_rate_hz}): {}",
+            sample_rate_errors.join(" | ")
+        ))
+    })?;
+    if sample_rate != requested_sample_rate_hz {
+        log::warn!(
+            "requested sample rate {} rejected; using fallback {}",
+            requested_sample_rate_hz,
+            sample_rate
+        );
+    }
+    let offset = lo_offset_hz(sample_rate);
+    // Park the LO `fs/4` below the user's target; the `−fs/4` digital
+    // mixer in `apply_fs4_shift` brings the tuned carrier back to DC
+    // with the hardware DC spike off-center (docs/DSP.md §1).
+    device.set_center_freq(args.frequency_hz.saturating_sub(offset))?;
     device.set_tuner_gain_mode(false)?;
     let gains = device.available_gains().unwrap_or_default();
 
     let tuner = device.tuner_handle();
-    let actual_freq = device.center_freq().saturating_sub(offset);
+    let actual_freq = device.center_freq().saturating_add(offset);
 
     let (iq_tx, iq_rx) = mpsc::channel::<DspInput>(IQ_CHANNEL_CAPACITY);
     let (control_tx, control_rx) = mpsc::unbounded_channel::<DemodControl>();
@@ -385,8 +424,8 @@ pub fn retune(args: RetuneArgs, state: State<'_, AppState>) -> Result<RetuneRepl
         .ok_or_else(|| RailError::InvalidParameter("tuner unavailable".into()))?;
 
     let offset = lo_offset_hz(session.sample_rate_hz);
-    tuner.set_center_freq(args.frequency_hz.saturating_add(offset))?;
-    let freq = tuner.center_freq().saturating_sub(offset);
+    tuner.set_center_freq(args.frequency_hz.saturating_sub(offset))?;
+    let freq = tuner.center_freq().saturating_add(offset);
     session.frequency_hz = freq;
     Ok(RetuneReply { frequency_hz: freq })
 }
@@ -592,4 +631,23 @@ pub fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder
             crate::ipc::replay_cmd::seek_replay,
             crate::ipc::replay_cmd::stop_replay,
         ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sample_rate_candidates;
+
+    #[test]
+    fn sample_rate_candidates_keep_requested_first() {
+        let c = sample_rate_candidates(2_400_000);
+        assert_eq!(c[0], 2_400_000);
+        assert!(c.contains(&2_048_000));
+    }
+
+    #[test]
+    fn sample_rate_candidates_dedup_requested_rate() {
+        let c = sample_rate_candidates(2_048_000);
+        let count = c.iter().filter(|&&hz| hz == 2_048_000).count();
+        assert_eq!(count, 1);
+    }
 }
