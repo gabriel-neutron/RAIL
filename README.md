@@ -44,6 +44,27 @@ If you’re hiring: it’s a deliberate **full-stack signal-processing exercise*
 
 ---
 
+## Quick start
+
+**Prerequisites**
+
+- [Rust](https://rustup.rs/) stable toolchain
+- [Node.js](https://nodejs.org/) 20+
+- `librtlsdr` installed for your platform:
+  - **Windows** — install [Zadig](https://zadig.akeo.ie/) and replace the dongle driver with WinUSB, then drop the librtlsdr prebuilts into `vendor/librtlsdr-win-x64/` (see [`docs/HARDWARE.md`](docs/HARDWARE.md) §6)
+  - **macOS** — `brew install librtlsdr`
+  - **Linux** — `sudo apt install librtlsdr-dev`
+- An RTL-SDR dongle (or skip to **Offline demo** below if you don’t have one)
+
+**Install and run**
+
+```bash
+npm install
+npm run tauri dev
+```
+
+---
+
 ## What I’ve verified
 
 So far I’ve only run this on **Windows** with **my RTL-SDR dongle**. Other setups *might* work — I just **haven’t verified** them. If something breaks on your machine, that’s useful signal; the repo is as much a **learning log** as a product.
@@ -70,4 +91,4 @@ Technical notes, architecture, and DSP references live in [`docs/`](docs/). If y
 
 ## License
 
-Not finalized yet — treat this as a **portfolio / educational** repo until a proper license is added.
+MIT — see [`LICENSE`](LICENSE).
