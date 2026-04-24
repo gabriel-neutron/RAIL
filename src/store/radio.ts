@@ -9,7 +9,7 @@ import {
 } from "../ipc/commands";
 import { useReplayStore } from "./replay";
 
-export type DemodMode = "FM" | "AM" | "USB" | "LSB" | "CW";
+export type DemodMode = "FM" | "NFM" | "AM" | "USB" | "LSB" | "CW";
 
 export type FreqUnit = "Hz" | "kHz" | "MHz";
 
@@ -72,6 +72,18 @@ export type RadioState = {
 
 const RETUNE_DEBOUNCE_MS = 30;
 const COMMAND_DEBOUNCE_MS = 60;
+
+/// Reference bandwidth for each mode — used to rescale the squelch threshold
+/// when switching modes so the gate position stays constant in SNR terms.
+/// See `docs/DSP.md` §6 (NFM/WBFM squelch note).
+const SQUELCH_REF_BW_HZ: Record<DemodMode, number> = {
+  FM: 200_000,
+  NFM: 12_500,
+  AM: 10_000,
+  USB: 2_700,
+  LSB: 2_700,
+  CW: 500,
+};
 
 let retuneTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingRetuneHz: number | null = null;
@@ -153,12 +165,18 @@ export const useRadioStore = create<RadioState>((set, get) => ({
   },
   setSampleRate: (sampleRateHz) => set({ sampleRateHz }),
   setMode: (mode) => {
+    const prev = get().mode;
     set({ mode });
-    // USB/LSB/CW stay frontend-only placeholders in Phase 3 — the
-    // Rust side rejects them with InvalidParameter, so avoid the
-    // round-trip.
-    if (mode === "FM" || mode === "AM") {
-      scheduleMode(mode, get().streaming);
+    scheduleMode(mode, get().streaming);
+    // Rescale the active squelch threshold to keep the SNR gate constant
+    // when moving between modes with different reference bandwidths.
+    // See docs/DSP.md §6 (squelch note).
+    const squelch = get().squelchDbfs;
+    if (squelch !== null && Number.isFinite(squelch) && prev !== mode) {
+      const offset = 10 * Math.log10(SQUELCH_REF_BW_HZ[mode] / SQUELCH_REF_BW_HZ[prev]);
+      const rescaled = Math.max(-100, Math.min(0, squelch + offset));
+      set({ squelchDbfs: rescaled });
+      scheduleSquelch(rescaled, get().streaming);
     }
   },
   setBandwidth: (bandwidthHz) => {
@@ -176,9 +194,7 @@ export const useRadioStore = create<RadioState>((set, get) => ({
       // Re-push the demod config on stream start so Rust's default
       // (WBFM/200 kHz/squelch off) matches the UI.
       const s = get();
-      if (s.mode === "FM" || s.mode === "AM") {
-        scheduleMode(s.mode, true);
-      }
+      scheduleMode(s.mode, true);
       scheduleBandwidth(s.bandwidthHz, true);
       scheduleSquelch(s.squelchDbfs, true);
     }

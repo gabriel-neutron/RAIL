@@ -1,7 +1,7 @@
 import { useRadioStore, type DemodMode } from "../../store/radio";
 
-const ACTIVE_MODES: DemodMode[] = ["FM", "AM"];
-const STUBBED_MODES: DemodMode[] = ["USB", "LSB", "CW"];
+const ACTIVE_MODES: DemodMode[] = ["FM", "NFM", "AM", "USB", "LSB", "CW"];
+const STUBBED_MODES: DemodMode[] = [];
 
 export const ModeSelector = () => {
   const mode = useRadioStore((s) => s.mode);
@@ -31,7 +31,7 @@ export const ModeSelector = () => {
             aria-checked={false}
             aria-disabled
             className="mode-btn mode-btn-disabled"
-            title="Coming in V1.1"
+            title="CW (Morse) — coming soon"
             disabled
           >
             {m}

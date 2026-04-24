@@ -54,20 +54,21 @@
 
 ---
 
-## Phase 8 — Demodulation expansion
+## Phase 8 — Demodulation expansion ✓
 
-**Goal**: user can demodulate narrow FM, upper and lower sideband signals —
-opening aviation repeaters, maritime voice, PMR446, and ham radio SSB.
+**Goal**: user can demodulate narrow FM, upper and lower sideband, and CW signals —
+opening aviation repeaters, maritime voice, PMR446, ham radio SSB, and Morse.
 
-- [ ] NFM demodulation (narrow FM): FM discriminator with 12.5 kHz filter
+- [x] NFM demodulation (narrow FM): FM discriminator with 12.5 kHz filter
       — same FM math as WBFM but with a narrower channel filter; see DSP.md §4
-- [ ] De-emphasis for NFM (300–3000 Hz voice shelf, not the 50/75 µs WBFM curve)
-- [ ] USB demodulation (upper sideband SSB): analytic signal shift + filter; see DSP.md §4
-- [ ] LSB demodulation (lower sideband SSB): mirror of USB
-- [ ] Mode selector updated: `WBFM | NFM | AM | USB | LSB`
-- [ ] Filter bandwidth presets per mode:
-      WBFM → 200 kHz, NFM → 12.5 kHz, AM → 10 kHz, USB/LSB → 3 kHz
-- [ ] Squelch threshold recalibrated for NFM noise floor (different from WBFM)
+- [x] De-emphasis for NFM (300–3000 Hz voice shelf, not the 50/75 µs WBFM curve)
+- [x] USB demodulation (upper sideband SSB): analytic signal shift + filter; see DSP.md §6
+- [x] LSB demodulation (lower sideband SSB): mirror of USB
+- [x] CW demodulation: USB phasing + 4th-order 700 Hz BPF (±200 Hz); see DSP.md §6
+- [x] Mode selector updated: `FM | NFM | AM | USB | LSB | CW`
+- [x] Filter bandwidth presets per mode:
+      FM → 200 kHz, NFM → 12.5 kHz, AM → 10 kHz, USB/LSB → 2.7 kHz, CW → 500 Hz
+- [x] Squelch threshold recalibrated for NFM noise floor (different from WBFM)
 
 **Exit criterion**: tune to 156.800 MHz (maritime VHF channel 16), select NFM,
 hear voice or carrier. Tune to 144.200 MHz (2m SSB calling), select USB, hear SSB voice.

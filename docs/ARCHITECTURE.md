@@ -82,7 +82,7 @@ RAIL uses two distinct IPC surfaces: **named JSON events** (low-rate status and 
 | `available_gains` | `availableGains()` | Supported gain steps (tenths dB) |
 | `retune` | `retune(frequencyHz)` | Retune the tuner; echoes applied frequency |
 | `set_ppm` | `setPpm(ppm)` | Tuner PPM correction |
-| `set_mode` | `setMode(mode)` | `FM` / `AM` / `USB` / `LSB` / `CW` |
+| `set_mode` | `setMode(mode)` | `FM` / `NFM` / `AM` / `USB` / `LSB` / `CW` |
 | `set_bandwidth` | `setBandwidth(bandwidthHz)` | Rebuild the channel filter |
 | `set_squelch` | `setSquelch(thresholdDbfs \| null)` | Audio-gate threshold |
 | Bookmarks | `listBookmarks`, `addBookmark`, `removeBookmark`, `replaceBookmarks` | Versioned JSON store CRUD |

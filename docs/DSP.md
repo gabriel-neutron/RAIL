@@ -6,7 +6,7 @@
 3. [Waterfall pipeline](#3-waterfall-pipeline)
 4. [FM demodulation](#4-fm-demodulation)
 5. [AM demodulation](#5-am-demodulation)
-6. [USB/LSB demodulation (V1.1)](#6-usblsb-demodulation-v11)
+6. [USB/LSB/CW demodulation](#6-usblsbcw-demodulation)
 7. [Filter design](#7-filter-design)
 8. [Edge cases and known pitfalls](#8-edge-cases-and-known-pitfalls)
 
@@ -113,7 +113,9 @@ where τ = 50×10⁻⁶ (Europe)
 then to ~44.1 kHz for audio output. Use integer decimation ratios where possible.
 
 ### Narrowband FM (NBFM — PMR, aviation voice)
-Same algorithm, different deviation (2.5–5 kHz) and lower sample rate.
+Same algorithm, different deviation (2.5–5 kHz) and narrower channel filter.
+Explicit `DemodMode::Nfm` in Rust — 5 kHz max deviation, 12.5 kHz channel BW,
+3 kHz audio LPF. No 50/75 µs de-emphasis (voice shelf instead).
 
 ---
 
@@ -136,16 +138,64 @@ This is the simplest demodulator — no phase tracking needed.
 
 ---
 
-## 6. USB/LSB demodulation (V1.1)
+## 6. USB/LSB/CW demodulation
 
-SSB demodulation requires the **Hilbert transform** to reconstruct the
-suppressed sideband. Defer to V1.1. Document here before implementing.
+SSB demodulation uses the **phasing method** on the complex IQ signal.
 
-USB: keep upper sideband, suppress lower.
-LSB: keep lower sideband, suppress upper.
+**Sign convention** (RTL-SDR outputs I+jQ, downconverted with exp(−jωc·t)):
 
-Method: apply a 90° phase-shift filter (Hilbert) to Q channel,
-then add/subtract I channel depending on sideband selection.
+For a USB tone at +fa: IQ baseband = exp(+j·2π·fa·t), so I=cos, Q=sin.
+For a LSB tone at −fa: IQ baseband = exp(−j·2π·fa·t), so I=cos, Q=−sin.
+
+With Hilbert defined as H{cos(ω·t)} = sin(ω·t), H{sin(ω·t)} = −cos(ω·t):
+
+```
+USB: y[n] = I_delayed[n] − H{Q[n]}
+LSB: y[n] = I_delayed[n] + H{Q[n]}
+```
+
+`I_delayed` is I delayed by `(hilbert_taps − 1) / 2` samples to align with
+the Hilbert FIR group delay.
+
+**Hilbert FIR taps** (Type III, antisymmetric, odd tap count N):
+```
+h[k] = 0                            if k == center
+h[k] = 2·sin²(π·k/2) / (π·k) · w[k]  otherwise
+     = 2/(π·k) · w[k]  for odd k (sin² = 1)
+     = 0                for even k (sin² = 0)
+```
+where k = tap index − center, w[k] = Hann window.
+
+**Decimation**: channel filter bandwidth set to 3 kHz. After Hilbert combine,
+apply audio LPF at 3 kHz, then resample to 44.1 kHz.
+
+### CW (Continuous Wave / Morse)
+
+CW uses the same phasing method as USB (carrier above zero offset), followed
+by a narrow IIR bandpass filter (BPF) that selects the CW sidetone frequency.
+
+**BPF design** (second-order RBJ biquad, §7):
+- Center: 700 Hz (standard CW sidetone, user tunes ~700 Hz above/below carrier)
+- Bandwidth: 400 Hz (−3 dB points at ~500 Hz and ~900 Hz)
+- Sample rate: 16 kHz (same `SSB_BASEBAND_RATE_HZ` as USB/LSB)
+
+```
+w0    = 2π · 700 / 16000
+Q     = 700 / 400 = 1.75
+alpha = sin(w0) / (2Q)
+b0    =  alpha / (1 + alpha),  b1 = 0,  b2 = −b0
+a1    = −2·cos(w0) / (1 + alpha)
+a2    = (1 − alpha) / (1 + alpha)
+y[n]  = b0·x[n] + b2·x[n−2] − a1·y[n−1] − a2·y[n−2]
+```
+
+**Pipeline**: USB SSB demod → 2 kHz LPF (anti-alias) → 700 Hz BPF → resample to 44.1 kHz.
+
+**Squelch note — NFM vs WBFM**: NFM's channel bandwidth (12.5 kHz) is ~16× narrower
+than WBFM (200 kHz), so integrated noise power is ~12 dB lower:
+`Δ = 10·log10(12500 / 200000) ≈ −12 dB`.
+When switching between WBFM and NFM, the UI scales the active squelch threshold
+by this offset so the gate position (in SNR terms) stays constant.
 
 ---
 

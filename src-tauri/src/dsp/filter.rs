@@ -207,6 +207,30 @@ impl FirDecimatorComplex {
     }
 }
 
+/// Hann-windowed Type III FIR Hilbert transformer taps.
+///
+/// Tap count must be odd. Non-zero only at odd offsets from center:
+/// `h[k] = 2/(π·k) · w[k]` for odd k, 0 for even k and center.
+/// Group delay = `(n_taps − 1) / 2` samples.
+///
+/// See `docs/DSP.md` §6.
+pub fn hilbert_fir_taps(n_taps: usize) -> Vec<f32> {
+    assert!(n_taps >= 3 && n_taps % 2 == 1, "Hilbert FIR needs odd tap count ≥ 3");
+    let center = (n_taps - 1) / 2;
+    let window = hann_window(n_taps);
+    let mut taps = vec![0.0_f32; n_taps];
+    for i in 0..n_taps {
+        if i == center {
+            continue; // center tap is always zero
+        }
+        let k = i as f32 - center as f32;
+        // sin²(π·k/2) = 1 for odd k, 0 for even k — only odd offsets contribute.
+        let sin_sq = (PI * k / 2.0).sin().powi(2);
+        taps[i] = 2.0 * sin_sq / (PI * k) * window[i];
+    }
+    taps
+}
+
 /// Single-pole IIR de-emphasis filter for broadcast WBFM.
 /// `y[n] = α·x[n] + (1−α)·y[n−1]`, with `α = 1 − exp(−1 / (τ·fs))`.
 ///
@@ -273,6 +297,96 @@ impl LinearResampler {
         // Re-anchor phase to the next block by subtracting the block
         // length. Keeps the accumulator from growing unbounded.
         self.phase -= input.len() as f32;
+    }
+}
+
+/// Second-order IIR bandpass filter (RBJ biquad).
+///
+/// CW usage: center 700 Hz, bandwidth 400 Hz at 16 kHz.
+/// See `docs/DSP.md` §6 for the coefficient derivation.
+pub struct BiquadBpf {
+    b0: f32,
+    b2: f32, // b1 = 0 for a pure bandpass
+    a1: f32,
+    a2: f32,
+    x1: f32,
+    x2: f32,
+    y1: f32,
+    y2: f32,
+}
+
+impl BiquadBpf {
+    /// Create a bandpass centered at `center_hz` with a −3 dB bandwidth
+    /// of `bandwidth_hz` at the given `sample_rate_hz`.
+    pub fn new(center_hz: f32, bandwidth_hz: f32, sample_rate_hz: f32) -> Self {
+        let w0 = 2.0 * PI * center_hz / sample_rate_hz;
+        let alpha = w0.sin() / (2.0 * center_hz / bandwidth_hz);
+        let a0 = 1.0 + alpha;
+        Self {
+            b0: alpha / a0,
+            b2: -alpha / a0,
+            a1: -2.0 * w0.cos() / a0,
+            a2: (1.0 - alpha) / a0,
+            x1: 0.0,
+            x2: 0.0,
+            y1: 0.0,
+            y2: 0.0,
+        }
+    }
+
+    /// Process one sample.
+    pub fn step(&mut self, x: f32) -> f32 {
+        let y = self.b0 * x + self.b2 * self.x2 - self.a1 * self.y1 - self.a2 * self.y2;
+        self.x2 = self.x1;
+        self.x1 = x;
+        self.y2 = self.y1;
+        self.y1 = y;
+        y
+    }
+
+    /// Process a buffer in-place.
+    pub fn process_inplace(&mut self, buf: &mut [f32]) {
+        for s in buf.iter_mut() {
+            *s = self.step(*s);
+        }
+    }
+
+    /// Reinitialize with new parameters, resetting state.
+    pub fn reconfigure(&mut self, center_hz: f32, bandwidth_hz: f32, sample_rate_hz: f32) {
+        *self = Self::new(center_hz, bandwidth_hz, sample_rate_hz);
+    }
+}
+
+/// Two cascaded `BiquadBpf` stages (4th-order bandpass).
+///
+/// Used for CW to achieve ~20 dB/octave selectivity — sufficient to suppress
+/// adjacent tones from the USB phasing output. See `docs/DSP.md` §6.
+pub struct BiquadBpf4 {
+    s1: BiquadBpf,
+    s2: BiquadBpf,
+}
+
+impl BiquadBpf4 {
+    /// Create a 4th-order bandpass centered at `center_hz` (Hz) with a
+    /// −3 dB bandwidth of `bandwidth_hz` (Hz) at `sample_rate_hz` (Hz).
+    pub fn new(center_hz: f32, bandwidth_hz: f32, sample_rate_hz: f32) -> Self {
+        Self {
+            s1: BiquadBpf::new(center_hz, bandwidth_hz, sample_rate_hz),
+            s2: BiquadBpf::new(center_hz, bandwidth_hz, sample_rate_hz),
+        }
+    }
+
+    /// Process a buffer in-place through both cascaded stages.
+    pub fn process_inplace(&mut self, buf: &mut [f32]) {
+        for s in buf.iter_mut() {
+            *s = self.s2.step(self.s1.step(*s));
+        }
+    }
+
+    /// Reinitialize both stages with new parameters, resetting all state.
+    pub fn reconfigure(&mut self, center_hz: f32, bandwidth_hz: f32, sample_rate_hz: f32) {
+        self.s1.reconfigure(center_hz, bandwidth_hz, sample_rate_hz);
+        self.s2.reconfigure(center_hz, bandwidth_hz, sample_rate_hz);
     }
 }
 
@@ -367,6 +481,31 @@ mod tests {
     }
 
     #[test]
+    fn hilbert_taps_are_antisymmetric_and_center_zero() {
+        let n = 65_usize;
+        let taps = hilbert_fir_taps(n);
+        let center = (n - 1) / 2;
+        assert!(taps[center].abs() < 1e-9, "center tap must be zero");
+        for i in 0..center {
+            assert!(
+                (taps[i] + taps[n - 1 - i]).abs() < 1e-6,
+                "tap {i} not antisymmetric: {} vs {}",
+                taps[i],
+                taps[n - 1 - i]
+            );
+        }
+    }
+
+    #[test]
+    fn hilbert_taps_even_offsets_are_zero() {
+        let taps = hilbert_fir_taps(65);
+        let center = 32_usize;
+        for i in (0..65).filter(|&i| (i as i32 - center as i32) % 2 == 0 && i != center) {
+            assert!(taps[i].abs() < 1e-9, "even-offset tap[{i}] should be 0");
+        }
+    }
+
+    #[test]
     fn linear_resampler_preserves_dc() {
         let mut r = LinearResampler::new(256_000.0, 44_100.0);
         let input = vec![0.25_f32; 4096];
@@ -375,5 +514,28 @@ mod tests {
         for (i, y) in out.iter().enumerate().skip(8) {
             assert!((*y - 0.25).abs() < 1e-4, "sample {i} = {y}");
         }
+    }
+
+    #[test]
+    fn biquad_bpf4_passes_center_attenuates_stopband() {
+        // 4th-order: 700 Hz center, 400 Hz BW, 16 kHz rate (CW parameters from DSP.md §6).
+        let fs = 16_000.0_f32;
+        let n = 4096_usize;
+        let half = n / 2;
+
+        let run = |freq: f32| -> f32 {
+            let mut bpf = BiquadBpf4::new(700.0, 400.0, fs);
+            let mut buf: Vec<f32> = (0..n)
+                .map(|k| (2.0 * PI * freq * k as f32 / fs).cos())
+                .collect();
+            bpf.process_inplace(&mut buf);
+            buf[half..].iter().fold(0.0_f32, |a, &x| a.max(x.abs()))
+        };
+
+        let passband_peak = run(700.0);
+        let stopband_peak = run(4_000.0);
+
+        assert!(passband_peak > 0.5, "BPF4 passband gain too low: {passband_peak}");
+        assert!(stopband_peak < 0.02, "BPF4 stopband not attenuated: {stopband_peak}");
     }
 }

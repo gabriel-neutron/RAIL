@@ -71,7 +71,7 @@ export const retune = (frequencyHz: number): Promise<RetuneReply> =>
 export const setPpm = (ppm: number): Promise<void> =>
   invoke<void>("set_ppm", { args: { ppm } });
 
-export type DemodModeWire = "FM" | "AM" | "USB" | "LSB" | "CW";
+export type DemodModeWire = "FM" | "NFM" | "AM" | "USB" | "LSB" | "CW";
 
 export const setMode = (mode: DemodModeWire): Promise<void> =>
   invoke<void>("set_mode", { args: { mode } });

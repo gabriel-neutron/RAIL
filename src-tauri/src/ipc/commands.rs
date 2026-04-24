@@ -9,6 +9,7 @@
 //! [`super::capture_cmd`], [`super::replay_cmd`], [`super::dsp_task`].
 
 use std::sync::Mutex;
+use std::time::Duration;
 
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Runtime, State};
@@ -45,10 +46,11 @@ const FALLBACK_SAMPLE_RATES_HZ: [u32; 5] = [2_048_000, 1_800_000, 1_400_000, 1_0
 fn parse_mode(s: &str) -> Result<DemodMode, RailError> {
     match s {
         "FM" => Ok(DemodMode::Fm),
+        "NFM" => Ok(DemodMode::Nfm),
         "AM" => Ok(DemodMode::Am),
-        "USB" | "LSB" | "CW" => Err(RailError::InvalidParameter(format!(
-            "{s} demodulator is stubbed for V1.1 (see docs/DSP.md §6)"
-        ))),
+        "USB" => Ok(DemodMode::Usb),
+        "LSB" => Ok(DemodMode::Lsb),
+        "CW" => Ok(DemodMode::Cw),
         other => Err(RailError::InvalidParameter(format!(
             "unknown mode: {other}"
         ))),
@@ -189,38 +191,72 @@ pub async fn start_stream<R: Runtime>(
     audio_channel: Channel<InvokeResponseBody>,
     state: State<'_, AppState>,
 ) -> Result<StartStreamReply, RailError> {
-    let mut guard = state.session.lock().map_err(session_poisoned)?;
-    if guard.is_some() {
-        return Err(RailError::InvalidParameter("stream already running".into()));
-    }
+    {
+        let guard = state.session.lock().map_err(session_poisoned)?;
+        if guard.is_some() {
+            return Err(RailError::InvalidParameter("stream already running".into()));
+        }
+    } // drop guard before any await points
 
     let requested_sample_rate_hz = args.sample_rate_hz.unwrap_or(DEFAULT_SAMPLE_RATE_HZ);
 
-    let device = RtlSdrDevice::open(0)?;
-    let mut applied_sample_rate_hz = None;
-    let mut sample_rate_errors: Vec<String> = Vec::new();
-    for candidate_hz in sample_rate_candidates(requested_sample_rate_hz) {
-        match device.set_sample_rate(candidate_hz) {
-            Ok(()) => {
-                applied_sample_rate_hz = Some(candidate_hz);
-                break;
-            }
-            Err(e) => sample_rate_errors.push(format!("{candidate_hz}: {e}")),
+    // On Windows with WinUSB, `rtlsdr_open` can succeed while the USB
+    // endpoint is still settling — the first register write then returns
+    // LIBUSB_ERROR_PIPE (-9).  Retry up to 3 times with a 100 ms gap;
+    // the device is always ready within one retry in practice.
+    // See `docs/HARDWARE.md` §6 ("rtlsdr_demod_write_reg failed with -9").
+    const OPEN_RETRIES: usize = 3;
+    let mut last_error = RailError::DeviceNotFound;
+    let mut open_result: Option<(RtlSdrDevice, u32)> = None;
+
+    for attempt in 0..OPEN_RETRIES {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            log::info!(
+                "RTL-SDR open retry {attempt}/{}: USB endpoint may not be ready yet",
+                OPEN_RETRIES - 1
+            );
         }
+
+        let dev = match RtlSdrDevice::open(0) {
+            Ok(d) => d,
+            Err(e) => {
+                last_error = e;
+                continue;
+            }
+        };
+
+        let mut found_rate: Option<u32> = None;
+        for candidate_hz in sample_rate_candidates(requested_sample_rate_hz) {
+            match dev.set_sample_rate(candidate_hz) {
+                Ok(()) => {
+                    if candidate_hz != requested_sample_rate_hz {
+                        log::warn!(
+                            "sample rate {} rejected; using fallback {}",
+                            requested_sample_rate_hz,
+                            candidate_hz
+                        );
+                    }
+                    found_rate = Some(candidate_hz);
+                    break;
+                }
+                Err(e) => {
+                    log::debug!("set_sample_rate({candidate_hz}): {e}");
+                    last_error = RailError::StreamError(format!(
+                        "failed to set sample rate (requested {requested_sample_rate_hz}): {e}"
+                    ));
+                }
+            }
+        }
+
+        if let Some(rate) = found_rate {
+            open_result = Some((dev, rate));
+            break;
+        }
+        // All rates failed — likely USB pipe error; drop `dev` and retry.
     }
-    let sample_rate = applied_sample_rate_hz.ok_or_else(|| {
-        RailError::StreamError(format!(
-            "failed to set sample rate (requested {requested_sample_rate_hz}): {}",
-            sample_rate_errors.join(" | ")
-        ))
-    })?;
-    if sample_rate != requested_sample_rate_hz {
-        log::warn!(
-            "requested sample rate {} rejected; using fallback {}",
-            requested_sample_rate_hz,
-            sample_rate
-        );
-    }
+
+    let (device, sample_rate) = open_result.ok_or(last_error)?;
     let offset = lo_offset_hz(sample_rate);
     // Park the LO `fs/4` below the user's target; the `−fs/4` digital
     // mixer in `apply_fs4_shift` brings the tuned carrier back to DC
@@ -263,6 +299,7 @@ pub async fn start_stream<R: Runtime>(
         sample_rate,
     );
 
+    let mut guard = state.session.lock().map_err(session_poisoned)?;
     *guard = Some(Session {
         dsp: Some(dsp_handle),
         sample_rate_hz: sample_rate,
@@ -474,7 +511,11 @@ pub fn set_mode(args: SetModeArgs, state: State<'_, AppState>) -> Result<(), Rai
         if let Some(s) = guard.as_mut() {
             s.mode = match mode {
                 DemodMode::Fm => "FM".into(),
+                DemodMode::Nfm => "NFM".into(),
                 DemodMode::Am => "AM".into(),
+                DemodMode::Usb => "USB".into(),
+                DemodMode::Lsb => "LSB".into(),
+                DemodMode::Cw => "CW".into(),
             };
         }
     }
