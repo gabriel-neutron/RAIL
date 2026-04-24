@@ -220,3 +220,25 @@ export const seekReplay = (positionMs: number): Promise<void> =>
   invoke<void>("seek_replay", { args: { positionMs } });
 
 export const stopReplay = (): Promise<void> => invoke<void>("stop_replay");
+
+/* -------- Scanner (wideband frequency sweep) -------- */
+
+export type StartScanArgs = {
+  startHz: number;
+  stopHz: number;
+  stepHz: number;
+  dwellMs: number;
+  squelchDbfs?: number | null;
+};
+
+export type ScanStartReply = {
+  frequenciesHz: number[];
+};
+
+export const startScan = (
+  args: StartScanArgs,
+  scanChannel: Channel<ArrayBuffer>,
+): Promise<ScanStartReply> =>
+  invoke<ScanStartReply>("start_scan", { args, scanChannel });
+
+export const stopScan = (): Promise<void> => invoke<void>("stop_scan");

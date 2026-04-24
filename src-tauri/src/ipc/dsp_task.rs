@@ -5,6 +5,8 @@
 //! in its own module so the tuning/lifecycle commands in
 //! [`super::commands`] stay short.
 
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytemuck::cast_slice;
@@ -57,9 +59,10 @@ pub(crate) fn spawn_dsp_task<R: Runtime>(
     capture_rx: mpsc::UnboundedReceiver<CaptureControl>,
     canceler: Option<IqCanceler>,
     sample_rate_hz: u32,
+    latest_dbfs_bits: Arc<AtomicU32>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::task::spawn_blocking(move || {
-        let mut ctx = DspTaskCtx::<R>::new(app, sample_rate_hz);
+        let mut ctx = DspTaskCtx::<R>::new(app, sample_rate_hz, latest_dbfs_bits);
         ctx.run(
             iq_rx,
             waterfall_channel,
@@ -96,6 +99,14 @@ struct DspTaskCtx<R: Runtime> {
     audio_writer: Option<WavStreamWriter>,
     /// `Some` while an IQ recording is in progress.
     iq_writer: Option<SigMfStreamWriter>,
+    /// Latest raw-IQ RMS in dBFS (raw f32 bits). Computed from the
+    /// fs/4-shifted IQ buffer *before* demodulation and written every
+    /// DSP cycle without rate-limiting so the scanner can poll true RF
+    /// power during each dwell window. Using raw IQ rather than
+    /// demodulated audio avoids the ~20–30 dB noise floor inflation
+    /// that FM/AM discriminators introduce on thermal noise.
+    /// See `crate::scanner` and `docs/TIMELINE.md` Phase 9.
+    latest_dbfs_bits: Arc<AtomicU32>,
 }
 
 /// Move exactly `n` items from `pending` into `scratch`, reusing
@@ -112,7 +123,7 @@ fn take_frame<T: Copy>(pending: &mut Vec<T>, scratch: &mut Vec<T>, n: usize) {
 }
 
 impl<R: Runtime> DspTaskCtx<R> {
-    fn new(app: AppHandle<R>, sample_rate_hz: u32) -> Self {
+    fn new(app: AppHandle<R>, sample_rate_hz: u32, latest_dbfs_bits: Arc<AtomicU32>) -> Self {
         Self {
             app,
             builder: FrameBuilder::new(FFT_SIZE),
@@ -129,6 +140,7 @@ impl<R: Runtime> DspTaskCtx<R> {
             sample_rate_hz,
             audio_writer: None,
             iq_writer: None,
+            latest_dbfs_bits,
         }
     }
 
@@ -194,6 +206,16 @@ impl<R: Runtime> DspTaskCtx<R> {
                     self.iq_writer = None;
                 }
             }
+
+            // Update scanner power readout from raw IQ (before demod).
+            // Raw IQ RMS is a direct measure of RF energy in the tuned
+            // bandwidth; demodulated audio RMS is ~20–30 dB higher on
+            // thermal noise due to discriminator noise shaping, causing
+            // false positives in the scanner. See docs/DSP.md §5.
+            self.latest_dbfs_bits.store(
+                compute_iq_rms_dbfs(&self.shifted).to_bits(),
+                Ordering::Relaxed,
+            );
 
             if !self.emit_waterfall_frames(&waterfall_channel, canceler.as_ref()) {
                 return;
@@ -428,6 +450,25 @@ impl<R: Runtime> DspTaskCtx<R> {
             record_audio_emit_interval();
         }
         true
+    }
+}
+
+/// Compute the RMS magnitude of a block of complex IQ samples as dBFS.
+///
+/// `rms = sqrt( mean( |s[i]|² ) )`, then `20·log₁₀(rms)`.
+/// Returns `f32::NEG_INFINITY` when `samples` is empty or all-zero.
+/// Called every DSP cycle to update the scanner's power readout with a
+/// true RF-energy measure (see `latest_dbfs_bits` in [`DspTaskCtx`]).
+fn compute_iq_rms_dbfs(samples: &[Complex<f32>]) -> f32 {
+    if samples.is_empty() {
+        return f32::NEG_INFINITY;
+    }
+    let sum_sq: f32 = samples.iter().map(|s| s.norm_sqr()).sum();
+    let rms = (sum_sq / samples.len() as f32).sqrt();
+    if rms > 0.0 {
+        20.0 * rms.log10()
+    } else {
+        f32::NEG_INFINITY
     }
 }
 

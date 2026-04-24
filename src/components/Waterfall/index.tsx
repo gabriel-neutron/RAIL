@@ -11,8 +11,8 @@ import { buildColormapLut } from "./colormap";
 
 const WATERFALL_HEIGHT = 360;
 const SPECTRUM_HEIGHT = 90;
-const DB_FLOOR = -100;
-const DB_PEAK = -20;
+const DB_FLOOR_DEFAULT = -100;
+const DB_CEIL_DEFAULT = -20;
 /// Cumulative pointer-motion threshold (px) that distinguishes a
 /// click-to-tune from a pan-to-retune gesture.
 const DRAG_THRESHOLD_PX = 4;
@@ -43,11 +43,53 @@ const cropCenter = (frame: Float32Array, zoom: number): Float32Array => {
   return frame.subarray(start, start + kept);
 };
 
+/// Apply a per-bin exponential moving average in the dB domain.
+/// `alpha` = 1.0 passes the frame through unchanged (no averaging).
+/// `alpha` < 1.0 blends the new frame into the running average:
+///   avg[i] = alpha × frame[i] + (1 − alpha) × avg[i]
+/// Lower alpha = more smoothing = slower response to rapid changes.
+function applyEma(
+  rawFrame: Float32Array,
+  avgRef: React.MutableRefObject<Float32Array | null>,
+  alpha: number,
+): Float32Array {
+  if (alpha >= 1.0) return rawFrame;
+  const prev = avgRef.current;
+  if (!prev || prev.length !== rawFrame.length) {
+    const init = new Float32Array(rawFrame);
+    avgRef.current = init;
+    return init;
+  }
+  const oneMinusAlpha = 1.0 - alpha;
+  for (let i = 0; i < prev.length; i += 1) {
+    prev[i] = alpha * rawFrame[i] + oneMinusAlpha * prev[i];
+  }
+  return prev;
+}
+
 export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
   const waterfallCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const spectrumCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const rowImageRef = useRef<ImageData | null>(null);
   const lut = useMemo(() => buildColormapLut(256), []);
+
+  const [dbFloor, setDbFloor] = useState(DB_FLOOR_DEFAULT);
+  const [dbCeil, setDbCeil] = useState(DB_CEIL_DEFAULT);
+  const dbFloorRef = useRef(dbFloor);
+  const dbCeilRef = useRef(dbCeil);
+  useEffect(() => { dbFloorRef.current = dbFloor; }, [dbFloor]);
+  useEffect(() => { dbCeilRef.current = dbCeil; }, [dbCeil]);
+
+  const handleFloorChange = (v: number) => setDbFloor(Math.min(v, dbCeil - 10));
+  const handleCeilChange = (v: number) => setDbCeil(Math.max(v, dbFloor + 10));
+
+  // Smooth = 0 → alpha 1.0 (raw, no averaging).
+  // Smooth = 65 → alpha 0.35 (balanced default).
+  // Smooth = 95 → alpha 0.05 (very smooth, slow to respond).
+  const [smooth, setSmooth] = useState(65);
+  const smoothRef = useRef(1.0 - smooth / 100);
+  useEffect(() => { smoothRef.current = 1.0 - smooth / 100; }, [smooth]);
+  const avgFrameRef = useRef<Float32Array | null>(null);
 
   const zoom = useRadioStore((s) => s.zoom);
   const sampleRateHz = useRadioStore((s) => s.sampleRateHz);
@@ -90,11 +132,19 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
     enabled,
     onAudio,
     onFrame: (rawFrame) => {
-      const frame = cropCenter(rawFrame, zoomRef.current);
+      const smoothed = applyEma(rawFrame, avgFrameRef, smoothRef.current);
+      const frame = cropCenter(smoothed, zoomRef.current);
       if (!isDraggingRef.current) {
-        drawWaterfallRow(waterfallCanvasRef.current, frame, rowImageRef, lut);
+        drawWaterfallRow(
+          waterfallCanvasRef.current,
+          frame,
+          rowImageRef,
+          lut,
+          dbFloorRef.current,
+          dbCeilRef.current,
+        );
       }
-      drawSpectrum(spectrumCanvasRef.current, frame);
+      drawSpectrum(spectrumCanvasRef.current, frame, dbFloorRef.current, dbCeilRef.current);
     },
   });
 
@@ -105,9 +155,10 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
     if (!ctx) return;
     ctx.fillStyle = "#07090c";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    // Reset the row buffer so the new frame length is used on the
-    // next draw (zoom change shrinks/grows the frame).
+    // Reset per-bin averaging and row buffer so the new frame length
+    // is used on the next draw (session change, zoom change, or seek).
     rowImageRef.current = null;
+    avgFrameRef.current = null;
   }, [session?.fftSize, zoom, waterfallEpoch]);
 
   // Register a PNG screenshot source with the capture store so the
@@ -245,6 +296,45 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
             </span>
           )}
         </div>
+        <div className="wf-range-controls">
+          <span className="wf-range-label">Floor</span>
+          <input
+            type="range"
+            className="wf-range-slider"
+            min={-130}
+            max={-30}
+            step={5}
+            value={dbFloor}
+            onChange={(e) => handleFloorChange(Number(e.target.value))}
+            aria-label="Waterfall floor dBFS"
+          />
+          <span className="wf-range-value">{dbFloor}</span>
+          <span className="wf-range-label">Ceil</span>
+          <input
+            type="range"
+            className="wf-range-slider"
+            min={-80}
+            max={0}
+            step={5}
+            value={dbCeil}
+            onChange={(e) => handleCeilChange(Number(e.target.value))}
+            aria-label="Waterfall ceiling dBFS"
+          />
+          <span className="wf-range-value">{dbCeil}</span>
+          <span className="wf-range-label wf-range-sep">|</span>
+          <span className="wf-range-label">Smooth</span>
+          <input
+            type="range"
+            className="wf-range-slider"
+            min={0}
+            max={95}
+            step={5}
+            value={smooth}
+            onChange={(e) => setSmooth(Number(e.target.value))}
+            aria-label="Waterfall temporal smoothing"
+          />
+          <span className="wf-range-value">{smooth}%</span>
+        </div>
       </div>
       <div className="spectrum-wrap">
         <Spectrum ref={spectrumCanvasRef} />
@@ -293,6 +383,8 @@ function drawWaterfallRow(
   frame: Float32Array,
   rowImageRef: React.MutableRefObject<ImageData | null>,
   lut: Uint8ClampedArray,
+  dbFloor: number,
+  dbCeil: number,
 ): void {
   if (!canvas) return;
   const ctx = canvas.getContext("2d", { alpha: false });
@@ -318,7 +410,7 @@ function drawWaterfallRow(
 
   const row = rowImageRef.current;
   const pixels = row.data;
-  const span = DB_PEAK - DB_FLOOR;
+  const span = dbCeil - dbFloor;
   const lutEntries = lut.length / 3;
   const profile = waterfallProfileEnabled();
   const t0 = profile ? performance.now() : 0;
@@ -328,7 +420,7 @@ function drawWaterfallRow(
     const binIdx = Math.floor((x * binCount) / canvasW);
     const normalized = Math.max(
       0,
-      Math.min(1, (frame[binIdx] - DB_FLOOR) / span),
+      Math.min(1, (frame[binIdx] - dbFloor) / span),
     );
     const lutIdx = (normalized * (lutEntries - 1)) | 0;
     const offset = lutIdx * 3;
@@ -376,11 +468,13 @@ function drawWaterfallRow(
 const drawWaterfallRowProfAccum = { lut: 0, blit: 0, n: 0 };
 
 /// Draw a dB-scaled magnitude curve (filled under the line) on the
-/// spectrum canvas. Uses the same `[DB_FLOOR, DB_PEAK]` range as the
+/// spectrum canvas. Uses the same `[dbFloor, dbCeil]` range as the
 /// waterfall colormap so the two views read consistently.
 function drawSpectrum(
   canvas: HTMLCanvasElement | null,
   frame: Float32Array,
+  dbFloor: number,
+  dbCeil: number,
 ): void {
   if (!canvas) return;
   const ctx = canvas.getContext("2d", { alpha: true });
@@ -398,9 +492,9 @@ function drawSpectrum(
   const h = canvas.height;
   ctx.clearRect(0, 0, w, h);
 
-  const span = DB_PEAK - DB_FLOOR;
+  const span = dbCeil - dbFloor;
   const toY = (db: number): number => {
-    const n = Math.max(0, Math.min(1, (db - DB_FLOOR) / span));
+    const n = Math.max(0, Math.min(1, (db - dbFloor) / span));
     return h - n * h;
   };
   const binToX = (i: number): number => (i / frame.length) * w;

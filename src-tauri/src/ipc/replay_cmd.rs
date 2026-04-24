@@ -9,6 +9,9 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Runtime, State};
 use tokio::sync::mpsc;
 
+use std::sync::atomic::AtomicU32;
+use std::sync::Arc;
+
 use crate::dsp::demod::{DemodControl, AUDIO_RATE_HZ};
 use crate::dsp::input::DspInput;
 use crate::error::RailError;
@@ -127,6 +130,9 @@ pub async fn start_replay<R: Runtime>(
     // No hardware reader to cancel — the DSP task exits cleanly when
     // the replay reader drops its `iq_tx`, and `stop_replay` sends
     // `ReplayControl::Stop` to break out of the pacing loop.
+    // Replay sessions do not support scanning, so we pass a throwaway
+    // AtomicU32 that nothing will poll.
+    let replay_dbfs_bits = Arc::new(AtomicU32::new(f32::NEG_INFINITY.to_bits()));
     let dsp_handle = spawn_dsp_task(
         app.clone(),
         iq_rx,
@@ -136,6 +142,7 @@ pub async fn start_replay<R: Runtime>(
         capture_rx,
         None,
         sample_rate,
+        replay_dbfs_bits.clone(),
     );
 
     let reader_handle = spawn_replay_reader(app.clone(), info.clone(), iq_tx, replay_ctl_rx);
@@ -155,6 +162,7 @@ pub async fn start_replay<R: Runtime>(
             control_tx: replay_ctl_tx,
             info: info.clone(),
         }),
+        latest_dbfs_bits: replay_dbfs_bits,
     });
     drop(guard);
 

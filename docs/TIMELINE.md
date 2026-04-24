@@ -75,21 +75,24 @@ hear voice or carrier. Tune to 144.200 MHz (2m SSB calling), select USB, hear SS
 
 ---
 
-## Phase 9 — Wideband scanner
+## Phase 9 — Wideband scanner ✓
 
 **Goal**: user can sweep a frequency range and auto-discover active signals
 without manually stepping through frequencies.
 
-- [ ] Scanner engine in Rust: configurable start freq, stop freq, step size, dwell time
-- [ ] Sequential tuning loop: `tune → wait dwell → measure peak power → advance`
-- [ ] Scan-stop condition: peak power exceeds squelch threshold during dwell
-- [ ] Sweep result emitted as a float32 power-per-step array via binary Tauri event
-- [ ] Band activity canvas in React: horizontal bar showing power across scanned range,
+- [x] Scanner engine in Rust: configurable start freq, stop freq, step size, dwell time
+- [x] Sequential tuning loop: `tune → wait dwell → measure peak power → advance`
+- [x] Scan-stop condition: peak power exceeds squelch threshold during dwell
+- [x] Sweep result emitted as a float32 power-per-step array via binary Tauri channel
+- [x] Band activity canvas in React: horizontal bar showing power across scanned range,
       same colormap as waterfall
-- [ ] Active-signal markers overlaid on band activity (vertical lines at peaks)
-- [ ] User controls: start/stop, step size (default = current BW ≈ 2.4 MHz),
-      dwell time (default 200 ms), scan range input
-- [ ] Click-to-tune on band activity canvas: clicking a marker tunes the main receiver
+- [x] Active-signal markers overlaid on band activity (vertical lines at peaks)
+- [x] User controls: start/stop, step size (default 200 kHz), dwell time (default 200 ms),
+      scan range input, adjustable squelch threshold
+- [x] Click-to-tune on band activity canvas: clicking a marker tunes the main receiver
+- [x] Chevron navigation (‹/›) between detected signals above threshold
+- [x] Waterfall floor/ceiling sliders + temporal EMA smoothing for noise suppression
+- [x] Raw IQ RMS power measurement (not demod audio) to avoid FM discriminator noise floor
 
 **Exit criterion**: scanner sweeps 87–108 MHz in 200 kHz steps,
 the band activity canvas fills with power levels, active FM stations appear as peaks,

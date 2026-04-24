@@ -49,6 +49,7 @@ hardware/      mod.rs, stream.rs, ffi.rs
 dsp/           input.rs, fft.rs, waterfall.rs, filter.rs, demod/{mod,fm,am}.rs
 capture/       sigmf.rs, wav.rs, tmp.rs
 replay.rs      SigMF playback reader
+scanner.rs     Wideband sweep engine (sequential retune → dwell → power measure)
 bookmarks.rs   versioned JSON store (atomic write)
 ipc/           commands.rs, events.rs
 error.rs       RailError (serde-tagged)
@@ -58,8 +59,9 @@ error.rs       RailError (serde-tagged)
 
 ```
 components/    Waterfall, FrequencyControl, ModeSelector, FilterBandMarker,
-               SignalMeter, AudioControls, Transport, MenuBar, PpmControl
-store/         zustand: radio / capture / replay
+               SignalMeter, AudioControls, Transport, MenuBar, PpmControl,
+               Scanner (band-activity canvas + sweep controls)
+store/         zustand: radio / capture / replay / scanner
 hooks/         useWaterfall, useAudio
 ipc/           commands.ts, events.ts
 ```
@@ -89,6 +91,7 @@ RAIL uses two distinct IPC surfaces: **named JSON events** (low-rate status and 
 | Capture | `start/stopAudioCapture`, `start/stopIqCapture`, `finalizeCapture`, `finalizeIqCapture`, `discardCapture` | Stage-then-finalize file I/O |
 | Screenshot | `screenshotSuggestion`, `saveScreenshot` | Suggest filename, atomic PNG write |
 | Replay | `openReplay`, `startReplay`, `pauseReplay`, `resumeReplay`, `seekReplay`, `stopReplay` | Transport for SigMF captures (incl. [`docs/assets/demo_iq.sigmf-data`](assets/demo_iq.sigmf-data)) |
+| Scanner | `startScan(args, scanCh)`, `stopScan()` | Sequential frequency sweep; `startScan` returns ordered `frequenciesHz[]`; one f32 per step on `scanCh` |
 
 ### 3.2 Named events (Rust → React, JSON)
 
@@ -97,6 +100,9 @@ RAIL uses two distinct IPC surfaces: **named JSON events** (low-rate status and 
 | `device-status` | `{ connected, error? }` | On connect / disconnect / error |
 | `signal-level` | `{ current, peak }` in dBFS | ≤ 25 Hz, rate-limited with peak decay |
 | `replay-position` | `{ sampleIdx, positionMs, totalMs, playing }` | ~25 Hz while replay is open |
+| `scan-step` | `{ frequencyHz }` | Per scanner retune (~200–240 ms cadence during a sweep); keeps display components in sync |
+| `scan-complete` | `{}` | Once, when a full sweep finishes without hitting squelch |
+| `scan-stopped` | `{ frequencyHz }` | Once, when the scanner halts early on a detected signal |
 
 Constants live in [`src-tauri/src/ipc/events.rs`](../src-tauri/src/ipc/events.rs); TS mirrors in [`src/ipc/events.ts`](../src/ipc/events.ts).
 
@@ -106,6 +112,7 @@ High-rate frames travel on `tauri::ipc::Channel<InvokeResponseBody>` opened by t
 
 - **`waterfallChannel`** (`start_stream`, `start_replay`): `FFT_SIZE × 4 = 32768` bytes of little-endian `f32` magnitude (dB), at ≤ 25 fps.
 - **`audioChannel`** (same): `AUDIO_CHUNK_SAMPLES × 4 ≈ 7 KB` of mono `f32` PCM at 44.1 kHz.
+- **`scanChannel`** (`start_scan`): one `f32` (4 bytes) per frequency step — the peak dBFS measured during that step's dwell window. Step order matches `frequenciesHz[]` from the command reply.
 
 Rust sends `InvokeResponseBody::Raw(Vec<u8>)`; the frontend receives an `ArrayBuffer` and wraps it with `new Float32Array(buffer)` (see [`src/hooks/useWaterfall.ts`](../src/hooks/useWaterfall.ts) and [`src/hooks/useAudio.ts`](../src/hooks/useAudio.ts)).
 

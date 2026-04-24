@@ -11,6 +11,7 @@ pub mod hardware;
 pub mod ipc;
 pub mod perf_emit;
 pub mod replay;
+pub mod scanner;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

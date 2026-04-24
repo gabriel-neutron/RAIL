@@ -62,6 +62,55 @@ impl SignalLevel {
     }
 }
 
+/// Payload for the `scan-step` JSON event. Emitted after each successful
+/// retune so the frontend can keep `radioStore.frequencyHz` in sync with
+/// the hardware. All display components (FrequencyAxis, FilterBandMarker,
+/// FrequencyControl) read from that store and update automatically.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanStep {
+    /// The logical target frequency (Hz) — after lo-offset correction,
+    /// matching what the user sees as the tuned centre.
+    pub frequency_hz: u32,
+}
+
+impl ScanStep {
+    pub fn emit<R: Runtime>(&self, app: &AppHandle<R>) -> Result<(), RailError> {
+        app.emit(EVENT_SCAN_STEP, self)
+            .map_err(|e| RailError::StreamError(format!("emit scan-step: {e}")))
+    }
+}
+
+/// Payload for the `scan-complete` JSON event. Emitted when a full sweep
+/// finishes without hitting the squelch threshold (see `docs/TIMELINE.md` Phase 9).
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct ScanComplete;
+
+impl ScanComplete {
+    /// Emit `scan-complete` to all frontend windows.
+    pub fn emit<R: Runtime>(&self, app: &AppHandle<R>) -> Result<(), RailError> {
+        app.emit(EVENT_SCAN_COMPLETE, self)
+            .map_err(|e| RailError::StreamError(format!("emit scan-complete: {e}")))
+    }
+}
+
+/// Payload for the `scan-stopped` JSON event. Emitted when the scanner
+/// halts early because a step's peak power exceeded the squelch threshold.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanStopped {
+    /// The frequency (Hz) at which the signal was detected.
+    pub frequency_hz: u32,
+}
+
+impl ScanStopped {
+    /// Emit `scan-stopped` to all frontend windows.
+    pub fn emit<R: Runtime>(&self, app: &AppHandle<R>) -> Result<(), RailError> {
+        app.emit(EVENT_SCAN_STOPPED, self)
+            .map_err(|e| RailError::StreamError(format!("emit scan-stopped: {e}")))
+    }
+}
+
 /// Payload for the `replay-position` JSON event. Emitted at ~25 Hz
 /// by the replay reader so the transport slider stays in sync with
 /// the IQ file read head (see [`crate::replay`]).

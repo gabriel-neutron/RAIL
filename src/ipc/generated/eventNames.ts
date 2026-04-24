@@ -2,4 +2,7 @@
 
 export const EVENT_DEVICE_STATUS = "device-status" as const;
 export const EVENT_REPLAY_POSITION = "replay-position" as const;
+export const EVENT_SCAN_COMPLETE = "scan-complete" as const;
+export const EVENT_SCAN_STEP = "scan-step" as const;
+export const EVENT_SCAN_STOPPED = "scan-stopped" as const;
 export const EVENT_SIGNAL_LEVEL = "signal-level" as const;

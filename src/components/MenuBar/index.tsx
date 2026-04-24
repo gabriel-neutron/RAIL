@@ -5,8 +5,9 @@ import { useBookmarksStore } from "../../store/bookmarks";
 import { useCaptureStore } from "../../store/capture";
 import { useRadioStore } from "../../store/radio";
 import { useReplayStore } from "../../store/replay";
+import { useScannerStore } from "../../store/scanner";
 
-type MenuKey = "file" | "settings" | "tools" | "bookmarks" | "capture";
+type MenuKey = "file" | "view" | "bookmarks" | "capture";
 
 const BOOKMARK_FILE_VERSION = 1;
 const BOOKMARK_EXPORT_NAME = "rail-bookmarks.json";
@@ -63,6 +64,8 @@ export const MenuBar = () => {
   const replayActive = useReplayStore((s) => s.active);
   const openReplayFile = useReplayStore((s) => s.openFile);
   const closeReplay = useReplayStore((s) => s.close);
+  const scannerVisible = useScannerStore((s) => s.visible);
+  const toggleScanner = useScannerStore((s) => s.toggleVisible);
   const items = useBookmarksStore((s) => s.items);
   const error = useBookmarksStore((s) => s.error);
   const add = useBookmarksStore((s) => s.add);
@@ -244,6 +247,32 @@ export const MenuBar = () => {
       <button type="button" className="menu-top" disabled aria-disabled="true">
         Tools
       </button>
+      <div className="menu-group">
+        <button
+          type="button"
+          className={open === "view" ? "menu-top menu-top-open" : "menu-top"}
+          aria-haspopup="menu"
+          aria-expanded={open === "view"}
+          onClick={() => toggle("view")}
+        >
+          View
+        </button>
+        {open === "view" && (
+          <div className="menu-dropdown menu-dropdown-left" role="menu">
+            <button
+              type="button"
+              role="menuitem"
+              className="menu-item"
+              onClick={() => {
+                toggleScanner();
+                setOpen(null);
+              }}
+            >
+              {scannerVisible ? "Hide Scanner" : "Show Scanner"}
+            </button>
+          </div>
+        )}
+      </div>
       <div className="menu-group">
         <button
           type="button"

@@ -8,7 +8,8 @@
 //! Capture, replay, and the DSP worker live in sibling modules:
 //! [`super::capture_cmd`], [`super::replay_cmd`], [`super::dsp_task`].
 
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tauri::ipc::{Channel, InvokeResponseBody};
@@ -86,6 +87,10 @@ pub(crate) struct Session {
     pub(crate) gain_tenths_db: Option<i32>,
     /// Source-specific bits (live hardware vs replay file).
     pub(crate) source: SessionSource,
+    /// Latest baseband RMS in dBFS (raw f32 bits). Shared with the
+    /// scanner task so it can poll power during each dwell window.
+    /// Initialised to `f32::NEG_INFINITY.to_bits()`.
+    pub(crate) latest_dbfs_bits: Arc<AtomicU32>,
 }
 
 /// Source-specific state for a [`Session`].
@@ -137,6 +142,9 @@ fn sample_rate_candidates(requested_hz: u32) -> Vec<u32> {
 #[derive(Default)]
 pub struct AppState {
     pub(crate) session: Mutex<Option<Session>>,
+    /// Active scanner task, if any. Held separately from `session` to
+    /// avoid deadlocks between the scanner and command handlers.
+    pub(crate) scanner: Mutex<Option<crate::scanner::ScannerHandle>>,
 }
 
 pub(crate) fn session_poisoned<T>(_: std::sync::PoisonError<T>) -> RailError {
@@ -288,6 +296,8 @@ pub async fn start_stream<R: Runtime>(
     )?;
     let canceler = stream.canceler();
 
+    let latest_dbfs_bits = Arc::new(AtomicU32::new(f32::NEG_INFINITY.to_bits()));
+
     let dsp_handle = spawn_dsp_task(
         app.clone(),
         iq_rx,
@@ -297,6 +307,7 @@ pub async fn start_stream<R: Runtime>(
         capture_rx,
         Some(canceler),
         sample_rate,
+        latest_dbfs_bits.clone(),
     );
 
     let mut guard = state.session.lock().map_err(session_poisoned)?;
@@ -314,6 +325,7 @@ pub async fn start_stream<R: Runtime>(
             tuner: Some(tuner),
             gains: gains.clone(),
         }),
+        latest_dbfs_bits,
     });
     drop(guard);
 
@@ -342,6 +354,20 @@ pub async fn stop_stream<R: Runtime>(
     _app: AppHandle<R>,
     state: State<'_, AppState>,
 ) -> Result<(), RailError> {
+    // Cancel any running scanner before tearing down the session it depends on.
+    {
+        let scanner = state
+            .scanner
+            .lock()
+            .ok()
+            .and_then(|mut g| g.take());
+        if let Some(h) = scanner {
+            h.cancel.store(true, Ordering::Relaxed);
+            // Don't await — let it exit on its own; the shared AtomicU32
+            // remains valid until both arcs are dropped.
+        }
+    }
+
     let session = {
         let mut guard = state.session.lock().map_err(session_poisoned)?;
         guard.take()
@@ -631,6 +657,114 @@ pub fn replace_bookmarks<R: Runtime>(
     store.replace(&app, args.bookmarks)
 }
 
+fn scanner_poisoned<T>(_: std::sync::PoisonError<T>) -> RailError {
+    RailError::StreamError("scanner lock poisoned".into())
+}
+
+/// Start a wideband frequency sweep. Requires an active live stream.
+///
+/// The scanner tunes through `args.start_hz..=args.stop_hz` in steps of
+/// `args.step_hz`, dwells `args.dwell_ms` at each step, and emits one
+/// `f32` (peak dBFS, 4 bytes) per step on `scan_channel`.
+/// When a full sweep completes, emits the `scan-complete` JSON event.
+/// When a step's peak exceeds `args.squelch_dbfs`, emits `scan-stopped`.
+/// See `docs/TIMELINE.md` Phase 9.
+#[tauri::command]
+pub async fn start_scan<R: Runtime>(
+    app: AppHandle<R>,
+    args: crate::scanner::StartScanArgs,
+    scan_channel: Channel<InvokeResponseBody>,
+    state: State<'_, AppState>,
+) -> Result<crate::scanner::ScanStartReply, RailError> {
+    if args.step_hz < 1_000 {
+        return Err(RailError::InvalidParameter(
+            "step_hz must be >= 1 000".into(),
+        ));
+    }
+    if args.dwell_ms < 50 {
+        return Err(RailError::InvalidParameter(
+            "dwell_ms must be >= 50".into(),
+        ));
+    }
+    if args.start_hz >= args.stop_hz {
+        return Err(RailError::InvalidParameter(
+            "start_hz must be less than stop_hz".into(),
+        ));
+    }
+
+    // Extract what the scanner task needs from the live session.
+    let (tuner, lo_offset, latest_dbfs_bits) = {
+        let guard = state.session.lock().map_err(session_poisoned)?;
+        let session = guard
+            .as_ref()
+            .ok_or_else(|| RailError::InvalidParameter("stream not running".into()))?;
+        let live = match &session.source {
+            SessionSource::Live(l) => l,
+            SessionSource::Replay(_) => {
+                return Err(RailError::InvalidParameter(
+                    "scanner is not available during replay".into(),
+                ))
+            }
+        };
+        let tuner = live
+            .tuner
+            .ok_or_else(|| RailError::InvalidParameter("tuner unavailable".into()))?;
+        let lo_offset = lo_offset_hz(session.sample_rate_hz);
+        (tuner, lo_offset, session.latest_dbfs_bits.clone())
+    };
+
+    // Cancel any previous scan.
+    {
+        let prev = state
+            .scanner
+            .lock()
+            .map_err(scanner_poisoned)?
+            .take();
+        if let Some(h) = prev {
+            h.cancel.store(true, Ordering::Relaxed);
+        }
+    }
+
+    let frequencies_hz = crate::scanner::build_frequency_list(
+        args.start_hz,
+        args.stop_hz,
+        args.step_hz,
+    );
+    let reply = crate::scanner::ScanStartReply {
+        frequencies_hz: frequencies_hz.clone(),
+    };
+
+    let handle = crate::scanner::spawn_scanner(
+        app,
+        tuner,
+        lo_offset,
+        frequencies_hz,
+        args.dwell_ms,
+        args.squelch_dbfs,
+        latest_dbfs_bits,
+        scan_channel,
+    );
+
+    *state.scanner.lock().map_err(scanner_poisoned)? = Some(handle);
+
+    Ok(reply)
+}
+
+/// Cancel an in-progress frequency sweep. Idempotent.
+#[tauri::command]
+pub async fn stop_scan(state: State<'_, AppState>) -> Result<(), RailError> {
+    let handle = state
+        .scanner
+        .lock()
+        .map_err(scanner_poisoned)?
+        .take();
+    if let Some(h) = handle {
+        h.cancel.store(true, Ordering::Relaxed);
+        let _ = h.handle.await;
+    }
+    Ok(())
+}
+
 /// Register the AppState and all commands on a Tauri builder.
 ///
 /// Commands from sibling modules are referenced via fully-qualified
@@ -671,6 +805,8 @@ pub fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder
             crate::ipc::replay_cmd::resume_replay,
             crate::ipc::replay_cmd::seek_replay,
             crate::ipc::replay_cmd::stop_replay,
+            start_scan,
+            stop_scan,
         ])
 }
 

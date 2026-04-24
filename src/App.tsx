@@ -17,6 +17,7 @@ import FrequencyControl from "./components/FrequencyControl";
 import MenuBar from "./components/MenuBar";
 import ModeSelector from "./components/ModeSelector";
 import PpmControl from "./components/PpmControl";
+import Scanner from "./components/Scanner";
 import SignalMeter from "./components/SignalMeter";
 import StatusPill from "./components/StatusPill";
 import Transport from "./components/Transport";
@@ -25,6 +26,7 @@ import useAudio from "./hooks/useAudio";
 import useKeyboardTuning from "./hooks/useKeyboardTuning";
 import { useRadioStore } from "./store/radio";
 import { useReplayStore } from "./store/replay";
+import { useScannerStore } from "./store/scanner";
 import "./App.css";
 
 type DeviceState =
@@ -64,6 +66,7 @@ function App() {
   const [pingResult, setPingResult] = useState<string>("…");
   const [device, setDevice] = useState<DeviceState>({ status: "idle" });
   const replayActive = useReplayStore((s) => s.active);
+  const scannerVisible = useScannerStore((s) => s.visible);
   const streamEnabled = device.status === "found" || replayActive;
 
   useKeyboardTuning();
@@ -244,17 +247,20 @@ function App() {
           />
         </div>
       </header>
-      <section className="control-panel">
-        <FrequencyControl />
-        <div className="control-panel-row">
-          <ModeSelector />
-          <FilterControl />
-        </div>
-        <div className="control-panel-row">
-          <AudioControls />
-          <PpmControl />
-        </div>
-      </section>
+      <div className="controls-row">
+        <section className="control-panel">
+          <FrequencyControl />
+          <div className="control-panel-row">
+            <ModeSelector />
+            <FilterControl />
+          </div>
+          <div className="control-panel-row">
+            <AudioControls />
+            <PpmControl />
+          </div>
+        </section>
+        {scannerVisible && <Scanner />}
+      </div>
       <div className="app-body">
         <Waterfall enabled={streamEnabled} onAudio={handleAudio} />
         <SignalMeter />

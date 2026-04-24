@@ -743,6 +743,65 @@ html,
   color: #d8b65a;
 }
 
+/* -------- Waterfall floor/ceiling range controls -------- */
+
+.wf-range-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.wf-range-label {
+  font-size: 10px;
+  color: #6b7785;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  white-space: nowrap;
+}
+
+.wf-range-sep {
+  color: #2a3442;
+  margin: 0 2px;
+}
+
+.wf-range-value {
+  font-size: 10px;
+  color: #9aa7b5;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  min-width: 3.8ch;
+  text-align: right;
+}
+
+.wf-range-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 80px;
+  height: 3px;
+  border-radius: 2px;
+  background: #1e2730;
+  outline: none;
+  cursor: pointer;
+}
+
+.wf-range-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #3aa0ff;
+  cursor: pointer;
+}
+
+.wf-range-slider::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #3aa0ff;
+  cursor: pointer;
+  border: none;
+}
+
 .spectrum-wrap {
   background-color: #07090c;
   border: 1px solid #1a1f26;
@@ -966,4 +1025,199 @@ html,
   font-size: 12px;
   color: #7b8b9c;
   white-space: nowrap;
+}
+
+/* -------- Controls row (signal card + scanner panel side-by-side) -------- */
+
+.controls-row {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.controls-row > .control-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+/* -------- Scanner panel -------- */
+
+.scanner-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #1a1f26;
+  border-radius: 6px;
+  background-color: #10151b;
+  width: 254px;
+  flex-shrink: 0;
+}
+
+.scanner-header {
+  color: #8793a0;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 10px;
+}
+
+.scanner-fields {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 5px 8px;
+}
+
+.scanner-label {
+  color: #8793a0;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.scanner-input {
+  background-color: #141a22;
+  border: 1px solid #1a1f26;
+  color: #e7ebf1;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  text-align: right;
+  width: 100%;
+  min-width: 0;
+  /* Hide native number-input spinners */
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.scanner-input::-webkit-inner-spin-button,
+.scanner-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.scanner-input:focus {
+  outline: none;
+  border-color: #3aa0ff;
+}
+
+.scanner-input:disabled {
+  color: #4a525c;
+}
+
+.scanner-unit {
+  color: #8793a0;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.scanner-separator {
+  height: 1px;
+  background-color: #1a1f26;
+}
+
+.scanner-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.scanner-btn {
+  padding: 4px 14px;
+  border-radius: 4px;
+  border: 1px solid;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out;
+  flex-shrink: 0;
+}
+
+.scanner-btn-start {
+  background-color: #101e13;
+  border-color: #1f4028;
+  color: #5dd38f;
+}
+
+.scanner-btn-start:hover:not(:disabled) {
+  background-color: #162b1b;
+  border-color: #2d5c3a;
+}
+
+.scanner-btn-stop {
+  background-color: #1e0e11;
+  border-color: #3d1a20;
+  color: #ff5470;
+}
+
+.scanner-btn-stop:hover {
+  background-color: #2a1217;
+  border-color: #5a2230;
+}
+
+.scanner-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.scanner-status {
+  font-size: 11px;
+  color: #8793a0;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-style: italic;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.scanner-nav {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.scanner-nav-btn {
+  background: none;
+  border: 1px solid #1e2a38;
+  color: #6b97c7;
+  font-size: 16px;
+  line-height: 1;
+  width: 22px;
+  height: 22px;
+  border-radius: 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: border-color 100ms, color 100ms;
+}
+
+.scanner-nav-btn:hover:not(:disabled) {
+  border-color: #3aa0ff;
+  color: #a8d4ff;
+}
+
+.scanner-nav-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.scanner-nav-label {
+  font-size: 11px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  color: #6b7785;
+  min-width: 3.5ch;
+  text-align: center;
+}
+
+.band-activity-canvas {
+  width: 100%;
+  height: 32px;
+  display: block;
+  border-radius: 3px;
+  cursor: crosshair;
+  image-rendering: pixelated;
 }

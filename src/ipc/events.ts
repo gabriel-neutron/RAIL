@@ -10,10 +10,20 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   EVENT_DEVICE_STATUS,
   EVENT_REPLAY_POSITION,
+  EVENT_SCAN_COMPLETE,
+  EVENT_SCAN_STEP,
+  EVENT_SCAN_STOPPED,
   EVENT_SIGNAL_LEVEL,
 } from "./generated/eventNames";
 
-export { EVENT_DEVICE_STATUS, EVENT_REPLAY_POSITION, EVENT_SIGNAL_LEVEL };
+export {
+  EVENT_DEVICE_STATUS,
+  EVENT_REPLAY_POSITION,
+  EVENT_SCAN_COMPLETE,
+  EVENT_SCAN_STEP,
+  EVENT_SCAN_STOPPED,
+  EVENT_SIGNAL_LEVEL,
+};
 
 export type DeviceStatusPayload = {
   connected: boolean;
@@ -55,5 +65,30 @@ export const subscribeReplayPosition = (
   handler: (payload: ReplayPositionPayload) => void,
 ): Promise<UnlistenFn> =>
   listen<ReplayPositionPayload>(EVENT_REPLAY_POSITION, (evt) =>
+    handler(evt.payload),
+  );
+
+export const subscribeScanComplete = (
+  handler: () => void,
+): Promise<UnlistenFn> =>
+  listen<Record<string, never>>(EVENT_SCAN_COMPLETE, () => handler());
+
+export type ScanStepPayload = {
+  frequencyHz: number;
+};
+
+export const subscribeScanStep = (
+  handler: (payload: ScanStepPayload) => void,
+): Promise<UnlistenFn> =>
+  listen<ScanStepPayload>(EVENT_SCAN_STEP, (evt) => handler(evt.payload));
+
+export type ScanStoppedPayload = {
+  frequencyHz: number;
+};
+
+export const subscribeScanStopped = (
+  handler: (payload: ScanStoppedPayload) => void,
+): Promise<UnlistenFn> =>
+  listen<ScanStoppedPayload>(EVENT_SCAN_STOPPED, (evt) =>
     handler(evt.payload),
   );
