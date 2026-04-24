@@ -181,8 +181,8 @@ cargo test --lib
 - Tauri WebView has full Web Audio support
 
 ### Why binary Tauri events over JSON for streaming?
-- JSON serialization of 2048 floats at 25fps = ~12MB/s overhead
-- Binary ArrayBuffer = ~200KB/s at same rate
+- JSON serialization of 8192 floats at 25fps = ~48MB/s overhead
+- Binary ArrayBuffer = ~800KB/s at same rate
 - No parsing overhead on React side
 - `Float32Array` wraps ArrayBuffer directly, zero copy
 

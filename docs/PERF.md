@@ -4,7 +4,7 @@ Notes for optional waterfall optimization, Rust emit profiling, and UI/CSS measu
 
 ## 1. Waterfall UI: `drawWaterfallRow` (colormap Worker gate)
 
-**Decision rule:** add a Web Worker for the colormap LUT loop **only if** main-thread profiling shows the LUT segment at **≥ ~1 ms per frame** at **FFT = 2048**.
+**Decision rule:** add a Web Worker for the colormap LUT loop **only if** main-thread profiling shows the LUT segment at **≥ ~1 ms per frame** at **FFT = 8192**.
 
 **Current status:** **NO-GO** until a live or long replay session records p95 LUT time ≥ ~1 ms/frame. A Web Worker was **not** added; re-open only when measurements justify `postMessage` overhead.
 
@@ -31,7 +31,7 @@ localStorage.removeItem("rail_profile_waterfall");
 
 ### 1.2 Chrome / Edge Performance panel
 
-1. Open DevTools → **Performance**, record ≥60 s with live stream or IQ replay at FFT 2048.
+1. Open DevTools → **Performance**, record ≥60 s with live stream or IQ replay at FFT 8192.
 2. Inspect long tasks on the main thread; locate `drawWaterfallRow` / waterfall frame handler.
 3. Record **p95** time for the LUT portion vs full row draw.
 

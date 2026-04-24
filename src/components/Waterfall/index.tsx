@@ -9,7 +9,6 @@ import FrequencyAxis from "../FrequencyAxis";
 import Spectrum from "../Spectrum";
 import { buildColormapLut } from "./colormap";
 
-const DEFAULT_FFT_SIZE = 2048;
 const WATERFALL_HEIGHT = 360;
 const SPECTRUM_HEIGHT = 90;
 const DB_FLOOR = -100;
@@ -257,7 +256,6 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
         className={
           isDragging ? "waterfall-canvas is-dragging" : "waterfall-canvas"
         }
-        width={DEFAULT_FFT_SIZE}
         height={WATERFALL_HEIGHT}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -300,8 +298,12 @@ function drawWaterfallRow(
   const ctx = canvas.getContext("2d", { alpha: false });
   if (!ctx) return;
 
-  if (canvas.width !== frame.length) {
-    canvas.width = frame.length;
+  // Fill the full CSS-rendered width so zoom never produces a tiny
+  // buffer that the browser has to upscale. clientWidth is 0 before
+  // first layout; fall back to the current attribute width in that case.
+  const targetW = canvas.clientWidth > 0 ? canvas.clientWidth : canvas.width;
+  if (canvas.width !== targetW) {
+    canvas.width = targetW;
   }
   if (canvas.height !== WATERFALL_HEIGHT) {
     canvas.height = WATERFALL_HEIGHT;
@@ -309,9 +311,9 @@ function drawWaterfallRow(
 
   if (
     rowImageRef.current === null ||
-    rowImageRef.current.width !== frame.length
+    rowImageRef.current.width !== canvas.width
   ) {
-    rowImageRef.current = ctx.createImageData(frame.length, 1);
+    rowImageRef.current = ctx.createImageData(canvas.width, 1);
   }
 
   const row = rowImageRef.current;
@@ -320,14 +322,17 @@ function drawWaterfallRow(
   const lutEntries = lut.length / 3;
   const profile = waterfallProfileEnabled();
   const t0 = profile ? performance.now() : 0;
-  for (let i = 0; i < frame.length; i += 1) {
+  const binCount = frame.length;
+  const canvasW = canvas.width;
+  for (let x = 0; x < canvasW; x += 1) {
+    const binIdx = Math.floor((x * binCount) / canvasW);
     const normalized = Math.max(
       0,
-      Math.min(1, (frame[i] - DB_FLOOR) / span),
+      Math.min(1, (frame[binIdx] - DB_FLOOR) / span),
     );
     const lutIdx = (normalized * (lutEntries - 1)) | 0;
     const offset = lutIdx * 3;
-    const out = i * 4;
+    const out = x * 4;
     pixels[out] = lut[offset];
     pixels[out + 1] = lut[offset + 1];
     pixels[out + 2] = lut[offset + 2];
@@ -381,8 +386,9 @@ function drawSpectrum(
   const ctx = canvas.getContext("2d", { alpha: true });
   if (!ctx) return;
 
-  if (canvas.width !== frame.length) {
-    canvas.width = frame.length;
+  const targetW = canvas.clientWidth > 0 ? canvas.clientWidth : canvas.width;
+  if (canvas.width !== targetW) {
+    canvas.width = targetW;
   }
   if (canvas.height !== SPECTRUM_HEIGHT) {
     canvas.height = SPECTRUM_HEIGHT;
@@ -397,6 +403,7 @@ function drawSpectrum(
     const n = Math.max(0, Math.min(1, (db - DB_FLOOR) / span));
     return h - n * h;
   };
+  const binToX = (i: number): number => (i / frame.length) * w;
 
   // Filled area under the curve.
   const gradient = ctx.createLinearGradient(0, 0, 0, h);
@@ -406,7 +413,7 @@ function drawSpectrum(
   ctx.beginPath();
   ctx.moveTo(0, h);
   for (let i = 0; i < frame.length; i += 1) {
-    ctx.lineTo(i, toY(frame[i]));
+    ctx.lineTo(binToX(i), toY(frame[i]));
   }
   ctx.lineTo(w, h);
   ctx.closePath();
@@ -418,8 +425,8 @@ function drawSpectrum(
   ctx.beginPath();
   for (let i = 0; i < frame.length; i += 1) {
     const y = toY(frame[i]);
-    if (i === 0) ctx.moveTo(i, y);
-    else ctx.lineTo(i, y);
+    if (i === 0) ctx.moveTo(binToX(i), y);
+    else ctx.lineTo(binToX(i), y);
   }
   ctx.stroke();
 }

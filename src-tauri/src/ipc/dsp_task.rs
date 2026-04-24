@@ -26,8 +26,9 @@ use crate::perf_emit::{
     record_audio_emit_interval, record_signal_level_emit_interval, record_waterfall_emit_interval,
 };
 
-/// FFT size (bins). Matches `docs/DSP.md` §2 default.
-pub(crate) const FFT_SIZE: usize = 2048;
+/// FFT size (bins). Gives 250 Hz/bin at 2.048 MHz sample rate.
+/// See `docs/DSP.md` §2.
+pub(crate) const FFT_SIZE: usize = 8192;
 
 /// Minimum interval between waterfall frames emitted to the frontend
 /// (~25 fps cap, `docs/DSP.md` §3).

@@ -41,7 +41,7 @@ Library used: `rustfft`. Do not reimplement FFT.
 **FFT size (N)**: tradeoff between frequency resolution and time resolution.
 - Frequency resolution: `Δf = fs / N`
 - Time per frame: `T = N / fs`
-- Recommended default: N = 2048 (balanced for waterfall display)
+- Current value: N = 8192 (250 Hz/bin at 2.048 MHz sample rate)
 - Valid sizes: powers of 2 for efficiency (`rustfft` accepts any, but 2^n is faster)
 
 **Process per frame**:
@@ -73,8 +73,8 @@ Rust must never send RGB. React must never compute FFT or magnitude.
 `[dark blue → blue → cyan → green → yellow → red]`
 mapped to the dB range `[noise_floor, signal_peak]`.
 
-**Frame rate**: target 25–30 fps. At fs=2.048 MHz and N=2048:
-`T = 2048/2048000 ≈ 1ms per FFT`. Average or skip frames to hit target fps.
+**Frame rate**: target 25–30 fps. At fs=2.048 MHz and N=8192:
+`T = 8192/2048000 ≈ 4ms per FFT`. Average or skip frames to hit target fps.
 
 ---
 

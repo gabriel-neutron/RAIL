@@ -104,7 +104,7 @@ Constants live in [`src-tauri/src/ipc/events.rs`](../src-tauri/src/ipc/events.rs
 
 High-rate frames travel on `tauri::ipc::Channel<InvokeResponseBody>` opened by the frontend and passed as command arguments:
 
-- **`waterfallChannel`** (`start_stream`, `start_replay`): `FFT_SIZE × 4 = 8192` bytes of little-endian `f32` magnitude (dB), at ≤ 25 fps.
+- **`waterfallChannel`** (`start_stream`, `start_replay`): `FFT_SIZE × 4 = 32768` bytes of little-endian `f32` magnitude (dB), at ≤ 25 fps.
 - **`audioChannel`** (same): `AUDIO_CHUNK_SAMPLES × 4 ≈ 7 KB` of mono `f32` PCM at 44.1 kHz.
 
 Rust sends `InvokeResponseBody::Raw(Vec<u8>)`; the frontend receives an `ArrayBuffer` and wraps it with `new Float32Array(buffer)` (see [`src/hooks/useWaterfall.ts`](../src/hooks/useWaterfall.ts) and [`src/hooks/useAudio.ts`](../src/hooks/useAudio.ts)).
