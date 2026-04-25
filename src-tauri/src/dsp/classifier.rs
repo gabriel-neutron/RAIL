@@ -343,6 +343,10 @@ fn frequency_prior_candidates(center_hz: u64) -> Vec<WireName> {
         // NOAA-APT: FM-family narrow; NFM is the closest demodulatable mode
         return vec!["NFM"];
     }
+    if hz_near(f, 129_125_000, 25_000) {
+        // ACARS (VHF datalink, DSB-AM): primary North American frequency
+        return vec!["AM"];
+    }
     if hz_near(f, 144_800_000, 10_000) {
         // APRS (digital AFSK on 2m): NFM carrier, but also USB used nearby
         return vec!["NFM"];
@@ -372,15 +376,34 @@ fn frequency_prior_candidates(center_hz: u64) -> Vec<WireName> {
         // 2m amateur: FM repeaters, SSB DX, CW — all three are common
         return vec!["NFM", "USB", "CW"];
     }
-    if hz_in(f, 156_000_000, 174_000_000) {
+    if hz_in(f, 151_000_000, 154_000_000) {
+        // MURS (Multi-Use Radio Service): unlicensed NFM, 12.5 kHz channels
         return vec!["NFM"];
     }
-    if hz_near(f, 446_000_000, 100_000) {
+    if hz_in(f, 162_400_000, 162_551_000) {
+        // NOAA weather radio: 7 broadcast frequencies 162.400–162.550 MHz
         return vec!["NFM"];
+    }
+    if hz_in(f, 156_000_000, 174_000_000) {
+        // Maritime VHF: ITU Ch 1–88 including coast guard, AIS
+        return vec!["NFM"];
+    }
+    if hz_in(f, 174_000_000, 240_000_000) {
+        // DAB III (Digital Audio Broadcasting Band III): OFDM digital multiplex,
+        // no decodable audio mode in RAIL
+        return vec![];
     }
     if hz_in(f, 430_000_000, 440_000_000) {
         // 70cm amateur: similar mix to 2m but no CW calling freq defined here
         return vec!["NFM", "USB"];
+    }
+    if hz_near(f, 446_000_000, 100_000) {
+        return vec!["NFM"];
+    }
+    if hz_in(f, 450_000_000, 470_000_000) {
+        // Public safety UHF + FRS/GMRS (462–467 MHz): all NFM
+        // Covers analog conventional, P25 Phase 1, trunked, and FRS/GMRS simplex
+        return vec!["NFM"];
     }
 
     vec![]
@@ -569,6 +592,44 @@ mod tests {
         let result = classify(&spectrum, &iq, 2_048_000, 200_000_000);
         assert_eq!(result.confirmed, Some("NFM"));
         assert!(result.candidates.is_empty());
+    }
+
+    // ── New band prior tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn acars_129mhz_returns_am() {
+        let result = classify(&vec![-100.0_f32; 8192], &fm_iq(8192), 2_048_000, 129_125_000);
+        assert!(result.candidates.contains(&"AM"), "ACARS prior should return AM");
+    }
+
+    #[test]
+    fn murs_151mhz_returns_nfm() {
+        let result = classify(&vec![-100.0_f32; 8192], &fm_iq(8192), 2_048_000, 152_000_000);
+        assert_eq!(result.candidates, vec!["NFM"], "MURS prior should return NFM");
+    }
+
+    #[test]
+    fn noaa_weather_radio_162mhz_returns_nfm() {
+        let result = classify(&vec![-100.0_f32; 8192], &fm_iq(8192), 2_048_000, 162_475_000);
+        assert_eq!(result.candidates, vec!["NFM"], "NOAA weather prior should return NFM");
+    }
+
+    #[test]
+    fn dab3_200mhz_returns_empty_no_audio_mode() {
+        let result = classify(&vec![-100.0_f32; 8192], &fm_iq(8192), 2_048_000, 200_000_000);
+        assert!(result.candidates.is_empty(), "DAB III prior should have no demodulatable candidates");
+    }
+
+    #[test]
+    fn frs_gmrs_462mhz_returns_nfm() {
+        let result = classify(&vec![-100.0_f32; 8192], &fm_iq(8192), 2_048_000, 462_562_500);
+        assert_eq!(result.candidates, vec!["NFM"], "FRS/GMRS prior should return NFM");
+    }
+
+    #[test]
+    fn public_safety_uhf_460mhz_returns_nfm() {
+        let result = classify(&vec![-100.0_f32; 8192], &fm_iq(8192), 2_048_000, 460_000_000);
+        assert_eq!(result.candidates, vec!["NFM"], "Public safety UHF prior should return NFM");
     }
 
     // Unknown band, narrow peak (<3 kHz) → broad_classify returns None — no guess

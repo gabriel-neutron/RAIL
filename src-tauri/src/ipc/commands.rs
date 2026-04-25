@@ -87,13 +87,13 @@ pub(crate) struct Session {
     pub(crate) gain_tenths_db: Option<i32>,
     /// Source-specific bits (live hardware vs replay file).
     pub(crate) source: SessionSource,
-    /// Latest baseband RMS in dBFS (raw f32 bits). Shared with the
-    /// scanner task so it can poll power during each dwell window.
-    /// Initialised to `f32::NEG_INFINITY.to_bits()`.
-    pub(crate) latest_dbfs_bits: Arc<AtomicU32>,
     /// Current centre frequency in Hz. Updated by [`retune`] so the
     /// classifier in the DSP task always uses the live-tuned frequency.
     pub(crate) center_hz_bits: Arc<AtomicU32>,
+    /// Per-bin peak dBFS accumulator shared with the scanner task.
+    /// The DSP task updates this every waterfall frame; the scanner resets
+    /// it after settle and reads it at dwell end for burst-aware detection.
+    pub(crate) max_dbfs_per_bin: Arc<Mutex<Vec<f32>>>,
 }
 
 /// Source-specific state for a [`Session`].
@@ -301,6 +301,7 @@ pub async fn start_stream<R: Runtime>(
 
     let latest_dbfs_bits = Arc::new(AtomicU32::new(f32::NEG_INFINITY.to_bits()));
     let center_hz_bits = Arc::new(AtomicU32::new(actual_freq));
+    let max_dbfs_per_bin = Arc::new(Mutex::new(vec![f32::NEG_INFINITY; FFT_SIZE]));
 
     let dsp_handle = spawn_dsp_task(
         app.clone(),
@@ -313,6 +314,7 @@ pub async fn start_stream<R: Runtime>(
         sample_rate,
         latest_dbfs_bits.clone(),
         center_hz_bits.clone(),
+        max_dbfs_per_bin.clone(),
     );
 
     let mut guard = state.session.lock().map_err(session_poisoned)?;
@@ -330,8 +332,8 @@ pub async fn start_stream<R: Runtime>(
             tuner: Some(tuner),
             gains: gains.clone(),
         }),
-        latest_dbfs_bits,
         center_hz_bits,
+        max_dbfs_per_bin,
     });
     drop(guard);
 
@@ -705,7 +707,7 @@ pub async fn start_scan<R: Runtime>(
     }
 
     // Extract what the scanner task needs from the live session.
-    let (tuner, lo_offset, latest_dbfs_bits) = {
+    let (tuner, lo_offset, max_dbfs_per_bin) = {
         let guard = state.session.lock().map_err(session_poisoned)?;
         let session = guard
             .as_ref()
@@ -722,7 +724,7 @@ pub async fn start_scan<R: Runtime>(
             .tuner
             .ok_or_else(|| RailError::InvalidParameter("tuner unavailable".into()))?;
         let lo_offset = lo_offset_hz(session.sample_rate_hz);
-        (tuner, lo_offset, session.latest_dbfs_bits.clone())
+        (tuner, lo_offset, session.max_dbfs_per_bin.clone())
     };
 
     // Cancel any previous scan.
@@ -753,7 +755,7 @@ pub async fn start_scan<R: Runtime>(
         frequencies_hz,
         args.dwell_ms,
         args.squelch_dbfs,
-        latest_dbfs_bits,
+        max_dbfs_per_bin,
         scan_channel,
     );
 

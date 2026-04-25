@@ -6,8 +6,8 @@
 //!
 //! See `docs/TIMELINE.md` Phase 9 and `docs/ARCHITECTURE.md` §3.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bytemuck::cast_slice;
@@ -72,8 +72,9 @@ pub(crate) fn build_frequency_list(start_hz: u32, stop_hz: u32, step_hz: u32) ->
 /// * `tuner` — copy of the live `TunerHandle`; the scan task calls
 ///   `set_center_freq` without interrupting the IQ reader thread.
 /// * `lo_offset_hz` — `sample_rate / 4` LO offset (see `docs/DSP.md` §1).
-/// * `latest_dbfs_bits` — shared atomic written every DSP buffer by the
-///   DSP task's `emit_signal_level`; the scanner polls this during dwell.
+/// * `max_dbfs_per_bin` — per-bin peak accumulator maintained by the DSP task.
+///   The scanner resets it after settle and reads the peak-of-bins at dwell end,
+///   capturing burst signals that would be missed by a single-poll approach.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_scanner<R: Runtime>(
     app: AppHandle<R>,
@@ -82,7 +83,7 @@ pub(crate) fn spawn_scanner<R: Runtime>(
     frequencies_hz: Vec<u32>,
     dwell_ms: u64,
     squelch_dbfs: Option<f32>,
-    latest_dbfs_bits: Arc<AtomicU32>,
+    max_dbfs_per_bin: Arc<Mutex<Vec<f32>>>,
     scan_channel: Channel<InvokeResponseBody>,
 ) -> ScannerHandle {
     let cancel = Arc::new(AtomicBool::new(false));
@@ -95,7 +96,7 @@ pub(crate) fn spawn_scanner<R: Runtime>(
             frequencies_hz,
             dwell_ms,
             squelch_dbfs,
-            latest_dbfs_bits,
+            max_dbfs_per_bin,
             scan_channel,
             cancel_task,
         )
@@ -121,7 +122,7 @@ async fn run_scanner<R: Runtime>(
     frequencies_hz: Vec<u32>,
     dwell_ms: u64,
     squelch_dbfs: Option<f32>,
-    latest_dbfs_bits: Arc<AtomicU32>,
+    max_dbfs_per_bin: Arc<Mutex<Vec<f32>>>,
     scan_channel: Channel<InvokeResponseBody>,
     cancel: Arc<AtomicBool>,
 ) {
@@ -146,14 +147,22 @@ async fn run_scanner<R: Runtime>(
         }
 
         // Settle: wait for the RTL-SDR to flush old-frequency samples.
-        // Do not track peak during this window (docs/HARDWARE.md §2).
+        // Do not measure during this window (docs/HARDWARE.md §2).
         tokio::time::sleep(SETTLE_MS).await;
         if cancel.load(Ordering::Relaxed) {
             return;
         }
 
-        // Dwell: poll dBFS every POLL_INTERVAL, track peak.
-        let mut peak_dbfs = f32::NEG_INFINITY;
+        // Reset accumulator at the start of the measurement window so that
+        // power from the previous step or the settle transient is discarded.
+        if let Ok(mut acc) = max_dbfs_per_bin.lock() {
+            acc.iter_mut().for_each(|v| *v = f32::NEG_INFINITY);
+        }
+
+        // Dwell: the DSP task continuously updates max_dbfs_per_bin; we only
+        // need to sleep and check for cancellation. Peak-of-bins is read once
+        // at the end of the window, capturing bursts that span any fraction of
+        // the dwell interval — including sub-POLL_INTERVAL events.
         let mut elapsed = Duration::ZERO;
         while elapsed < dwell {
             if cancel.load(Ordering::Relaxed) {
@@ -161,11 +170,12 @@ async fn run_scanner<R: Runtime>(
             }
             tokio::time::sleep(POLL_INTERVAL).await;
             elapsed += POLL_INTERVAL;
-            let dbfs = f32::from_bits(latest_dbfs_bits.load(Ordering::Relaxed));
-            if dbfs.is_finite() && dbfs > peak_dbfs {
-                peak_dbfs = dbfs;
-            }
         }
+
+        let peak_dbfs = {
+            let acc = max_dbfs_per_bin.lock().unwrap_or_else(|e| e.into_inner());
+            acc.iter().copied().filter(|v| v.is_finite()).fold(f32::NEG_INFINITY, f32::max)
+        };
 
         emit_step(&scan_channel, peak_dbfs);
 

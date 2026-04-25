@@ -72,20 +72,20 @@ This phase is based on `@REVIEW.md`, read it for extra details.
 
 ---
 
-## Phase 15 — Coverage and classifier expansion
+## Phase 15 — Coverage and classifier expansion ✅
 
 This phase is based on `@REVIEW.md`, read it for extra details.
 
 **Goal**: close test coverage gaps and expand the frequency prior to cover common scan targets.
 
-- [ ] **Add FM demodulator unit test** — `dsp/demod/fm.rs` `#[cfg(test)]`
+- [x] **Add FM demodulator unit test** — `dsp/demod/fm.rs` `#[cfg(test)]`
       Constant-phase-deviation IQ → assert audio amplitude within expected range; cite DSP.md §4
       *(2 h)*
-- [ ] **Expand classifier frequency prior** — `classifier.rs` match arm
+- [x] **Expand classifier frequency prior** — `classifier.rs` match arm
       Add: NOAA weather radio (162.4–162.55 MHz), FRS/GMRS (462–467 MHz), MURS (151–154 MHz), public safety UHF (450–470 MHz), ACARS (129.125 MHz), DAB III (174–240 MHz)
       *(2 h)*
-- [ ] **Fix scanner measurement** — `scanner.rs`, `ipc/dsp_task.rs`
-      Replace single `latest_dbfs_bits` poll with float array accumulating `max_dbfs_per_bin` over the full dwell window; enables burst detection and richer band-activity canvas
+- [x] **Fix scanner measurement** — `scanner.rs`, `ipc/dsp_task.rs`, `ipc/commands.rs`
+      Replaced single `latest_dbfs_bits` poll with `Arc<Mutex<Vec<f32>>>` accumulating `max_dbfs_per_bin` per FFT bin over the full dwell window; DSP task updates via `try_lock` each waterfall frame; scanner resets after settle, reads peak-of-bins at dwell end; burst detection now works for sub-20 ms signals
       *(4–6 h)*
 
 **Exit criterion**: FM demod test passes; common bands return correct classifier labels; scanner catches sub-50 ms burst traffic.

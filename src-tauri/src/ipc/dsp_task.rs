@@ -6,7 +6,7 @@
 //! [`super::commands`] stay short.
 
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bytemuck::cast_slice;
@@ -67,9 +67,16 @@ pub(crate) fn spawn_dsp_task<R: Runtime>(
     sample_rate_hz: u32,
     latest_dbfs_bits: Arc<AtomicU32>,
     center_hz_bits: Arc<AtomicU32>,
+    max_dbfs_per_bin: Arc<Mutex<Vec<f32>>>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::task::spawn_blocking(move || {
-        let mut ctx = DspTaskCtx::<R>::new(app, sample_rate_hz, latest_dbfs_bits, center_hz_bits);
+        let mut ctx = DspTaskCtx::<R>::new(
+            app,
+            sample_rate_hz,
+            latest_dbfs_bits,
+            center_hz_bits,
+            max_dbfs_per_bin,
+        );
         ctx.run(
             iq_rx,
             waterfall_channel,
@@ -106,13 +113,10 @@ struct DspTaskCtx<R: Runtime> {
     audio_writer: Option<WavStreamWriter>,
     /// `Some` while an IQ recording is in progress.
     iq_writer: Option<SigMfStreamWriter>,
-    /// Latest raw-IQ RMS in dBFS (raw f32 bits). Computed from the
-    /// fs/4-shifted IQ buffer *before* demodulation and written every
-    /// DSP cycle without rate-limiting so the scanner can poll true RF
-    /// power during each dwell window. Using raw IQ rather than
-    /// demodulated audio avoids the ~20–30 dB noise floor inflation
-    /// that FM/AM discriminators introduce on thermal noise.
-    /// See `crate::scanner` and `docs/TIMELINE.md` Phase 9.
+    /// Latest raw-IQ RMS in dBFS (raw f32 bits). Used by `emit_signal_level`
+    /// to drive the signal meter. Computed from the fs/4-shifted IQ buffer
+    /// *before* demodulation; using raw IQ avoids the ~20–30 dB noise floor
+    /// inflation that FM/AM discriminators introduce on thermal noise.
     latest_dbfs_bits: Arc<AtomicU32>,
     /// Current centre frequency in Hz (plain u32, not float bits).
     /// Updated atomically by [`retune`] so the classifier always uses
@@ -123,6 +127,12 @@ struct DspTaskCtx<R: Runtime> {
     /// Last FFT spectrum snapshot retained for classification.
     /// Populated in `emit_waterfall_frames`; consumed in `emit_classification`.
     last_spectrum: Vec<f32>,
+    /// Per-bin peak dBFS accumulator shared with the scanner task.
+    /// Updated element-wise on every waterfall frame: each bin holds the
+    /// maximum spectral power observed since the scanner last reset it.
+    /// The scanner resets this at the end of the settle window and reads
+    /// it at the end of the dwell window. See `crate::scanner`.
+    max_dbfs_per_bin: Arc<Mutex<Vec<f32>>>,
 }
 
 /// Move exactly `n` items from `pending` into `scratch`, reusing
@@ -144,6 +154,7 @@ impl<R: Runtime> DspTaskCtx<R> {
         sample_rate_hz: u32,
         latest_dbfs_bits: Arc<AtomicU32>,
         center_hz_bits: Arc<AtomicU32>,
+        max_dbfs_per_bin: Arc<Mutex<Vec<f32>>>,
     ) -> Self {
         Self {
             app,
@@ -165,6 +176,7 @@ impl<R: Runtime> DspTaskCtx<R> {
             center_hz_bits,
             last_classify_emit: Instant::now() - MIN_CLASSIFY_INTERVAL,
             last_spectrum: Vec::with_capacity(FFT_SIZE),
+            max_dbfs_per_bin,
         }
     }
 
@@ -463,6 +475,20 @@ impl<R: Runtime> DspTaskCtx<R> {
                     // waterfall emit — see `emit_classification`).
                     self.last_spectrum.clear();
                     self.last_spectrum.extend_from_slice(spectrum);
+
+                    // Per-bin peak accumulator for the scanner. try_lock so
+                    // the DSP task never stalls if the scanner holds the lock
+                    // briefly to reset or read.
+                    if let Ok(mut acc) = self.max_dbfs_per_bin.try_lock() {
+                        if acc.len() != spectrum.len() {
+                            acc.resize(spectrum.len(), f32::NEG_INFINITY);
+                        }
+                        for (a, &s) in acc.iter_mut().zip(spectrum.iter()) {
+                            if s > *a {
+                                *a = s;
+                            }
+                        }
+                    }
 
                     let bytes: &[u8] = cast_slice(spectrum);
                     // `Vec<u8>` allocation here is forced by Tauri's

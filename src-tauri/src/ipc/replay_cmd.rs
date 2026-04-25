@@ -10,7 +10,7 @@ use tauri::{AppHandle, Runtime, State};
 use tokio::sync::mpsc;
 
 use std::sync::atomic::AtomicU32;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::dsp::demod::{DemodControl, AUDIO_RATE_HZ};
 use crate::dsp::input::DspInput;
@@ -130,10 +130,11 @@ pub async fn start_replay<R: Runtime>(
     // No hardware reader to cancel — the DSP task exits cleanly when
     // the replay reader drops its `iq_tx`, and `stop_replay` sends
     // `ReplayControl::Stop` to break out of the pacing loop.
-    // Replay sessions do not support scanning, so we pass a throwaway
-    // AtomicU32 that nothing will poll.
+    // Replay sessions do not support scanning, so the per-bin accumulator
+    // is a throwaway that nothing will read.
     let replay_dbfs_bits = Arc::new(AtomicU32::new(f32::NEG_INFINITY.to_bits()));
     let replay_center_hz_bits = Arc::new(AtomicU32::new(frequency_hz));
+    let replay_max_dbfs_per_bin = Arc::new(Mutex::new(Vec::new()));
     let dsp_handle = spawn_dsp_task(
         app.clone(),
         iq_rx,
@@ -145,6 +146,7 @@ pub async fn start_replay<R: Runtime>(
         sample_rate,
         replay_dbfs_bits.clone(),
         replay_center_hz_bits.clone(),
+        replay_max_dbfs_per_bin.clone(),
     );
 
     let reader_handle = spawn_replay_reader(app.clone(), info.clone(), iq_tx, replay_ctl_rx);
@@ -164,8 +166,8 @@ pub async fn start_replay<R: Runtime>(
             control_tx: replay_ctl_tx,
             info: info.clone(),
         }),
-        latest_dbfs_bits: replay_dbfs_bits,
         center_hz_bits: replay_center_hz_bits,
+        max_dbfs_per_bin: replay_max_dbfs_per_bin,
     });
     drop(guard);
 
