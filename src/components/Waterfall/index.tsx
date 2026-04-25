@@ -316,7 +316,7 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
               fs={(session.sampleRateHz / 1e6).toFixed(3)} MHz · N=
               {session.fftSize} · span=
               {(displayedSpanHz / 1e6).toFixed(3)} MHz · zoom=
-              {zoom.toFixed(1)}x
+              {zoom.toFixed(1)}x · DC ±{(session.sampleRateHz / 4 / 1e6).toFixed(3)} MHz
             </span>
           )}
         </div>

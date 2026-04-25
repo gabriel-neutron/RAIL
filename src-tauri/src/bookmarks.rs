@@ -28,6 +28,13 @@ pub struct Bookmark {
     pub id: String,
     pub name: String,
     pub frequency_hz: u32,
+    /// Demodulation mode at save time (e.g. `"FM"`, `"NFM"`). `None` for
+    /// bookmarks created before Phase 14; restoring a `None` mode is a no-op.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    /// Filter bandwidth in Hz at save time. `None` for pre-Phase-14 bookmarks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bandwidth_hz: Option<u32>,
     /// Unix epoch seconds. Cheap, sortable, no external crate.
     pub created_at: u64,
 }
@@ -123,6 +130,8 @@ impl BookmarksStore {
         app: &AppHandle<R>,
         name: String,
         frequency_hz: u32,
+        mode: Option<String>,
+        bandwidth_hz: Option<u32>,
     ) -> Result<Bookmark, RailError> {
         let trimmed = name.trim();
         if trimmed.is_empty() {
@@ -141,6 +150,8 @@ impl BookmarksStore {
             id: format!("{:x}", now_nanos.as_nanos()),
             name: trimmed.to_string(),
             frequency_hz,
+            mode,
+            bandwidth_hz,
             created_at: now_nanos.as_secs(),
         };
         file.bookmarks.push(bookmark.clone());
@@ -216,6 +227,8 @@ mod tests {
             id: "abc".into(),
             name: "BBC".into(),
             frequency_hz: 98_800_000,
+            mode: Some("FM".into()),
+            bandwidth_hz: Some(200_000),
             created_at: 1_700_000_000,
         };
         let file = BookmarksFile {
@@ -227,6 +240,8 @@ mod tests {
         assert_eq!(loaded.bookmarks.len(), 1);
         assert_eq!(loaded.bookmarks[0].name, "BBC");
         assert_eq!(loaded.bookmarks[0].frequency_hz, 98_800_000);
+        assert_eq!(loaded.bookmarks[0].mode.as_deref(), Some("FM"));
+        assert_eq!(loaded.bookmarks[0].bandwidth_hz, Some(200_000));
     }
 
     fn tempdir() -> PathBuf {

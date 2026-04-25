@@ -87,6 +87,10 @@ export type Bookmark = {
   id: string;
   name: string;
   frequencyHz: number;
+  /// Demodulation mode saved with the bookmark. Absent on pre-Phase-14 entries.
+  mode?: string;
+  /// Filter bandwidth in Hz saved with the bookmark. Absent on pre-Phase-14 entries.
+  bandwidthHz?: number;
   createdAt: number;
 };
 
@@ -96,8 +100,12 @@ export const listBookmarks = (): Promise<Bookmark[]> =>
 export const addBookmark = (
   name: string,
   frequencyHz: number,
+  mode?: string,
+  bandwidthHz?: number,
 ): Promise<Bookmark> =>
-  invoke<Bookmark>("add_bookmark", { args: { name, frequencyHz } });
+  invoke<Bookmark>("add_bookmark", {
+    args: { name, frequencyHz, mode: mode ?? null, bandwidthHz: bandwidthHz ?? null },
+  });
 
 export const removeBookmark = (id: string): Promise<void> =>
   invoke<void>("remove_bookmark", { args: { id } });

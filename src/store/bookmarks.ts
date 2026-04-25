@@ -13,7 +13,7 @@ export type BookmarksState = {
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
-  add: (name: string, frequencyHz: number) => Promise<void>;
+  add: (name: string, frequencyHz: number, mode?: string, bandwidthHz?: number) => Promise<void>;
   remove: (id: string) => Promise<void>;
   /// Wholesale replace (used by the "Load" menu entry).
   replaceAll: (bookmarks: Bookmark[]) => Promise<void>;
@@ -42,9 +42,9 @@ export const useBookmarksStore = create<BookmarksState>((set) => ({
       set({ loading: false, error: formatError(err) });
     }
   },
-  add: async (name, frequencyHz) => {
+  add: async (name, frequencyHz, mode, bandwidthHz) => {
     try {
-      const created = await addBookmark(name, frequencyHz);
+      const created = await addBookmark(name, frequencyHz, mode, bandwidthHz);
       set((state) => ({
         items: [...state.items, created].sort(
           (a, b) => a.createdAt - b.createdAt,

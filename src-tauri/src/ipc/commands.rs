@@ -614,6 +614,11 @@ fn send_control(state: &State<'_, AppState>, msg: DemodControl) -> Result<(), Ra
 pub struct AddBookmarkArgs {
     pub name: String,
     pub frequency_hz: u32,
+    /// Demodulation mode at save time — forwarded as-is (no validation needed;
+    /// backend stores whatever the frontend sends).
+    pub mode: Option<String>,
+    /// Filter bandwidth in Hz at save time.
+    pub bandwidth_hz: Option<u32>,
 }
 
 #[tauri::command]
@@ -630,7 +635,7 @@ pub fn add_bookmark<R: Runtime>(
     args: AddBookmarkArgs,
     store: State<'_, BookmarksStore>,
 ) -> Result<Bookmark, RailError> {
-    store.add(&app, args.name, args.frequency_hz)
+    store.add(&app, args.name, args.frequency_hz, args.mode, args.bandwidth_hz)
 }
 
 /// Arguments for [`remove_bookmark`].

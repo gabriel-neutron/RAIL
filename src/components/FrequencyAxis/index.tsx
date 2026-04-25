@@ -203,6 +203,30 @@ export const FrequencyAxis = () => {
       ctx.fillText(labels[i], labelX, labelY);
     }
 
+    // DC spike from the fs/4 LO offset technique (see docs/DSP.md §1–3).
+    // The hardware LO is parked at frequencyHz − sampleRateHz/4; the digital
+    // fs/4 mixer shifts the signal of interest to canvas center while pushing
+    // the DC spike to frequencyHz − sampleRateHz/4 in real Hz.
+    const dcSpikeHz = frequencyHz - sampleRateHz / 4;
+    if (dcSpikeHz >= minHz && dcSpikeHz <= maxHz) {
+      const xDc = hzToX(dcSpikeHz);
+      const xsDc = Math.round(xDc) + 0.5;
+      ctx.save();
+      ctx.strokeStyle = "rgba(255, 180, 60, 0.7)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 3]);
+      ctx.beginPath();
+      ctx.moveTo(xsDc, 0);
+      ctx.lineTo(xsDc, cssHeight);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+      ctx.fillStyle = "rgba(255, 180, 60, 0.9)";
+      ctx.font = "9px 'JetBrains Mono', ui-monospace, monospace";
+      ctx.textAlign = "left";
+      ctx.fillText("DC", Math.min(xDc + 2, cssWidth - 18), labelY);
+    }
+
     // Frame the band with a 1 px bottom border so the axis reads as
     // a discrete strip between spectrum and filter marker.
     ctx.strokeStyle = BASELINE_COLOR;

@@ -5,7 +5,7 @@ import type { Bookmark } from "../../ipc/commands";
 import { startScan } from "../../ipc/commands";
 import { useBookmarksStore } from "../../store/bookmarks";
 import { useCaptureStore } from "../../store/capture";
-import { useRadioStore } from "../../store/radio";
+import { useRadioStore, type DemodMode } from "../../store/radio";
 import { useReplayStore } from "../../store/replay";
 import { useScannerStore } from "../../store/scanner";
 
@@ -51,6 +51,8 @@ const parseBookmarksFile = (raw: unknown): Bookmark[] => {
       id: typeof e.id === "string" && e.id.length > 0 ? e.id : crypto.randomUUID(),
       name: name.trim(),
       frequencyHz: Math.max(0, Math.round(freq)),
+      ...(typeof e.mode === "string" && e.mode.length > 0 ? { mode: e.mode } : {}),
+      ...(typeof e.bandwidthHz === "number" ? { bandwidthHz: e.bandwidthHz } : {}),
       createdAt:
         typeof e.createdAt === "number"
           ? e.createdAt
@@ -66,6 +68,8 @@ export const MenuBar = () => {
 
   const frequencyHz = useRadioStore((s) => s.frequencyHz);
   const setFrequency = useRadioStore((s) => s.setFrequency);
+  const setMode = useRadioStore((s) => s.setMode);
+  const setBandwidth = useRadioStore((s) => s.setBandwidth);
   const streaming = useRadioStore((s) => s.streaming);
   const squelchDbfs = useRadioStore((s) => s.squelchDbfs);
   const autoApplyMode = useRadioStore((s) => s.autoApplyMode);
@@ -132,12 +136,7 @@ export const MenuBar = () => {
     URL.revokeObjectURL(url);
   };
 
-  const handleSave = () => {
-    downloadBookmarks(serializeBookmarks());
-    setOpen(null);
-  };
-
-  const handleSaveAs = async () => {
+  const handleExport = async () => {
     const body = serializeBookmarks();
     const picker = (
       window as unknown as {
@@ -179,7 +178,7 @@ export const MenuBar = () => {
         setOpen(null);
         return;
       }
-      console.error("[RAIL] save-as failed:", err);
+      console.error("[RAIL] bookmark export failed:", err);
       downloadBookmarks(body);
     }
     setOpen(null);
@@ -251,7 +250,8 @@ export const MenuBar = () => {
       setOpen(null);
       return;
     }
-    void add(trimmed, frequencyHz);
+    const { mode, bandwidthHz } = useRadioStore.getState();
+    void add(trimmed, frequencyHz, mode, bandwidthHz);
     setOpen(null);
   };
 
@@ -403,17 +403,9 @@ export const MenuBar = () => {
               type="button"
               role="menuitem"
               className="menu-item"
-              onClick={handleSave}
+              onClick={() => void handleExport()}
             >
-              Save
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              className="menu-item"
-              onClick={() => void handleSaveAs()}
-            >
-              Save As…
+              Export…
             </button>
             <button
               type="button"
@@ -446,12 +438,14 @@ export const MenuBar = () => {
                       disabled={replayActive}
                       onClick={() => {
                         setFrequency(b.frequencyHz);
+                        if (b.mode) setMode(b.mode as DemodMode);
+                        if (b.bandwidthHz) setBandwidth(b.bandwidthHz);
                         setOpen(null);
                       }}
                       title={
                         replayActive
                           ? "Disabled during replay"
-                          : `Tune to ${formatFrequency(b.frequencyHz)}`
+                          : `Tune to ${formatFrequency(b.frequencyHz)}${b.mode ? ` · ${b.mode}` : ""}`
                       }
                     >
                       <span className="menu-bookmark-name">{b.name}</span>

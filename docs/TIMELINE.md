@@ -56,22 +56,17 @@ This phase is based on `@REVIEW.md`, read it for extra details.
 
 ---
 
-## Phase 14 — UX improvements
+## Phase 14 — UX improvements ✅
 
 This phase is based on `@REVIEW.md`, read it for extra details.
 
 **Goal**: surface backend features that are fully implemented but missing from the UI.
 
-- [ ] **Add squelch slider** — `App.tsx` + new `SquelchControl.tsx` component
-      Range: −100 to 0 dBFS, "disabled" position at minimum; calls `setSquelchDbfs` store action
-      Position: between AudioControls and PpmControl
-      *(2 h)*
-- [ ] **Extend bookmarks to store mode + bandwidth** — `bookmarks.rs`, `ipc/commands.rs`, `store/bookmarks.ts`
-      Add optional `mode: Option<String>` and `bandwidth_hz: Option<u32>` to `Bookmark`; apply on tune (missing fields = no change)
-      *(3 h)*
-- [ ] **Add DC offset annotation to waterfall** — `Waterfall.tsx`, `FrequencyAxis.tsx`
-      Status bar: `DC: ±{sampleRate/4} MHz`; thin annotation line on `FrequencyAxis` at `center_hz ± sample_rate/4`
-      *(1 h)*
+- [x] **Add squelch slider** — implemented inside `AudioControls` as a `HoverSlider` (range −100 to 0 dBFS, "disabled" when collapsed); calls `setSquelchDbfs` store action — functional on all modes including NFM
+- [x] **Extend bookmarks to store mode + bandwidth** — `bookmarks.rs`, `ipc/commands.rs`, `store/bookmarks.ts`
+      `mode` and `bandwidth_hz` added as optional fields; tune handler restores all three; old bookmarks without these fields load cleanly
+- [x] **Add DC offset annotation to waterfall** — `FrequencyAxis/index.tsx`, `Waterfall/index.tsx`
+      Dashed amber line + "DC" label at `center − fs/4` on FrequencyAxis (disappears when zoomed past the spike); status bar shows `DC ±N MHz`
 
 **Exit criterion**: squelch slider visible and functional on NFM; tuning a bookmark restores mode and bandwidth; waterfall status bar shows DC offset.
 
