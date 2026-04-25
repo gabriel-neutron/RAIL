@@ -109,8 +109,11 @@ H(z) = (1 - e^(-1/τfs)) / (1 - e^(-1/τfs)·z^(-1))
 where τ = 50×10⁻⁶ (Europe)
 ```
 
-**Decimation**: WBFM — decimate from fs to ~200 kHz before demodulation,
-then to ~44.1 kHz for audio output. Use integer decimation ratios where possible.
+For all modes: single-stage decimation with a 65-tap windowed-sinc LPF.
+The channel cutoff is set to half the user bandwidth, bounded by 90 % of
+the baseband Nyquist. For NFM, AM and SSB the narrow channel bandwidth
+leaves an ample guard band; for WBFM the 65-tap filter provides adequate
+suppression for practical reception quality.
 
 ### Narrowband FM (NBFM — PMR, aviation voice)
 Same algorithm, different deviation (2.5–5 kHz) and narrower channel filter.
@@ -190,6 +193,35 @@ y[n]  = b0·x[n] + b2·x[n−2] − a1·y[n−1] − a2·y[n−2]
 ```
 
 **Pipeline**: USB SSB demod → 2 kHz LPF (anti-alias) → 700 Hz BPF → resample to 44.1 kHz.
+
+### DC-blocking IIR (SSB baseband)
+
+A second-order Butterworth high-pass at 10 Hz is applied to complex baseband before
+the Hilbert transform to eliminate I/Q DC bias introduced by the RTL-SDR's digitisation
+path. RBJ cookbook coefficients (`Q = 1/√2`, `fs = 16 kHz`, `fc = 10 Hz`):
+
+```
+w0 = 2π · 10 / 16000
+α  = sin(w0) / √2
+b0 = b2 = (1 + cos w0) / (2(1 + α))
+b1 = −(1 + cos w0) / (1 + α)
+a1 = −2 cos w0 / (1 + α),   a2 = (1 − α) / (1 + α)
+```
+
+Applied independently to I and Q to preserve per-channel state.
+
+### Group delay compensation (SSB)
+
+The 65-tap audio LPF has group delay `(65 − 1) / 2 = 32` samples. Applying it to both
+I and Q paths separately (before the Hilbert transform on Q) keeps both paths aligned:
+
+```
+Q path: audio_lpf (32 samples) + Hilbert FIR (64 samples) = 96 samples total
+I path: audio_lpf (32 samples) + I delay buffer (64 samples) = 96 samples total
+```
+
+The `i_buf` length (`HILBERT_TAPS − 1) / 2 = 64`) is unchanged — it compensates only for
+the Hilbert group delay, since the LPF delays cancel symmetrically between the paths.
 
 **Squelch note — NFM vs WBFM**: NFM's channel bandwidth (12.5 kHz) is ~16× narrower
 than WBFM (200 kHz), so integrated noise power is ~12 dB lower:

@@ -100,7 +100,7 @@ pub struct DemodChain {
     resampler: LinearResampler,
     config: DemodConfig,
     /// `true` when the current mode is WBFM (broadcast) — gates the
-    /// de-emphasis filter.
+    /// de-emphasis filter and the 2-stage decimator.
     wbfm: bool,
     // Scratch buffers, reused between calls to avoid allocations.
     baseband: Vec<Complex<f32>>,
@@ -120,20 +120,19 @@ impl DemodChain {
     pub fn with_config(input_rate_hz: f32, config: DemodConfig) -> Self {
         let bb_rate = baseband_rate_for(config.mode);
         assert!(input_rate_hz > bb_rate);
-        let decim_factor = (input_rate_hz / bb_rate).round() as usize;
         let channel_cutoff = channel_cutoff_for(config.bandwidth_hz, bb_rate);
-        let chan_taps = sinc_lowpass_taps(channel_cutoff, input_rate_hz, CHANNEL_FIR_TAPS);
-
         let (audio_cutoff, max_dev_hz, wbfm) = mode_params(config.mode, config.bandwidth_hz);
         let audio_taps = sinc_lowpass_taps(audio_cutoff, bb_rate, AUDIO_FIR_TAPS);
         // Guard FM discriminator against zero deviation (USB/LSB don't use it).
         let fm_dev = if max_dev_hz > 0.0 { max_dev_hz } else { 5_000.0 };
 
+        let decim = build_decim(input_rate_hz, bb_rate, channel_cutoff);
+
         Self {
             input_rate_hz,
             baseband_rate_hz: bb_rate,
             audio_rate_hz: AUDIO_RATE_HZ,
-            decim: FirDecimatorComplex::new(chan_taps, decim_factor),
+            decim,
             fm: FmDiscriminator::new(bb_rate, fm_dev),
             am: AmEnvelope::new(bb_rate),
             ssb: ssb_for_mode(config.mode),
@@ -181,13 +180,9 @@ impl DemodChain {
 
     fn reconfigure_channel(&mut self) {
         let cutoff = channel_cutoff_for(self.config.bandwidth_hz, self.baseband_rate_hz);
-        let taps = sinc_lowpass_taps(cutoff, self.input_rate_hz, CHANNEL_FIR_TAPS);
-        let factor = (self.input_rate_hz / self.baseband_rate_hz).round() as usize;
-        if self.decim.factor() == factor {
-            self.decim.set_taps(taps);
-        } else {
-            self.decim = FirDecimatorComplex::new(taps, factor);
-        }
+        let (_, _, wbfm) = mode_params(self.config.mode, self.config.bandwidth_hz);
+        self.decim = build_decim(self.input_rate_hz, self.baseband_rate_hz, cutoff);
+        self.wbfm = wbfm;
     }
 
     fn reconfigure_mode(&mut self) {
@@ -195,15 +190,15 @@ impl DemodChain {
         let new_bb_rate = baseband_rate_for(self.config.mode);
         if (new_bb_rate - self.baseband_rate_hz).abs() > 0.1 {
             self.baseband_rate_hz = new_bb_rate;
-            let factor = (self.input_rate_hz / new_bb_rate).round() as usize;
-            let cutoff = channel_cutoff_for(self.config.bandwidth_hz, new_bb_rate);
-            let taps = sinc_lowpass_taps(cutoff, self.input_rate_hz, CHANNEL_FIR_TAPS);
-            self.decim = FirDecimatorComplex::new(taps, factor);
             self.resampler = LinearResampler::new(new_bb_rate, self.audio_rate_hz);
         }
 
+        let cutoff = channel_cutoff_for(self.config.bandwidth_hz, self.baseband_rate_hz);
         let (audio_cutoff, max_dev_hz, wbfm) =
             mode_params(self.config.mode, self.config.bandwidth_hz);
+        self.decim = build_decim(self.input_rate_hz, self.baseband_rate_hz, cutoff);
+        self.wbfm = wbfm;
+
         let audio_taps = sinc_lowpass_taps(audio_cutoff, self.baseband_rate_hz, AUDIO_FIR_TAPS);
         self.audio_lpf = FirFilter::new(audio_taps);
         if matches!(self.config.mode, DemodMode::Fm | DemodMode::Nfm) {
@@ -220,7 +215,6 @@ impl DemodChain {
                 .reconfigure(CW_BPF_CENTER_HZ, CW_BPF_BW_HZ, self.baseband_rate_hz);
         }
         self.deemph = DeemphasisIir::new(DEEMPHASIS_TAU_S, self.baseband_rate_hz);
-        self.wbfm = wbfm;
     }
 
     /// Feed one IQ chunk (pre-fs/4-shifted complex baseband at
@@ -243,11 +237,19 @@ impl DemodChain {
             }
         }
 
-        // Audio LPF is the anti-alias for the resampler.
+        // Audio LPF (anti-alias for resampler). For SSB/CW, per-path LPF is
+        // applied inside SsbDemodulator — see docs/DSP.md §6.
         self.filtered_audio.clear();
         self.filtered_audio.reserve(self.raw_audio.len());
-        for &x in self.raw_audio.iter() {
-            self.filtered_audio.push(self.audio_lpf.step(x));
+        match self.config.mode {
+            DemodMode::Usb | DemodMode::Lsb | DemodMode::Cw => {
+                self.filtered_audio.extend_from_slice(&self.raw_audio);
+            }
+            _ => {
+                for &x in self.raw_audio.iter() {
+                    self.filtered_audio.push(self.audio_lpf.step(x));
+                }
+            }
         }
 
         // WBFM de-emphasis only — `self.wbfm` is false for NFM/AM/SSB/CW.
@@ -271,6 +273,18 @@ impl DemodChain {
 
         rms_dbfs
     }
+}
+
+/// Build the channel decimation filter for `input_rate_hz → bb_rate`.
+/// Uses a 65-tap windowed-sinc LPF at `channel_cutoff`. See `docs/DSP.md` §4.
+fn build_decim(
+    input_rate_hz: f32,
+    bb_rate: f32,
+    channel_cutoff: f32,
+) -> FirDecimatorComplex {
+    let factor = (input_rate_hz / bb_rate).round() as usize;
+    let taps = sinc_lowpass_taps(channel_cutoff, input_rate_hz, CHANNEL_FIR_TAPS);
+    FirDecimatorComplex::new(taps, factor)
 }
 
 /// Channel-filter cutoff for a user-facing bandwidth, bounded by the

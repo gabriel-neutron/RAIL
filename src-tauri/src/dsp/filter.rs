@@ -357,6 +357,81 @@ impl BiquadBpf {
     }
 }
 
+/// Second-order Butterworth high-pass IIR filter (RBJ biquad).
+///
+/// Used for DC blocking on SSB complex baseband at ~10 Hz cutoff.
+/// See `docs/DSP.md` §6 for the coefficient derivation.
+pub struct BiquadHpf {
+    b0: f32,
+    b1: f32,
+    b2: f32,
+    a1: f32,
+    a2: f32,
+    x1: f32,
+    x2: f32,
+    y1: f32,
+    y2: f32,
+}
+
+impl BiquadHpf {
+    /// Butterworth high-pass at `cutoff_hz` (Hz), sample rate `sample_rate_hz` (Hz).
+    pub fn new(cutoff_hz: f32, sample_rate_hz: f32) -> Self {
+        let w0 = 2.0 * PI * cutoff_hz / sample_rate_hz;
+        let cos_w0 = w0.cos();
+        // Q = 1/√2 for maximally-flat (Butterworth) magnitude response.
+        let alpha = w0.sin() / 2.0_f32.sqrt();
+        let a0_inv = 1.0 / (1.0 + alpha);
+        Self {
+            b0: (1.0 + cos_w0) * 0.5 * a0_inv,
+            b1: -(1.0 + cos_w0) * a0_inv,
+            b2: (1.0 + cos_w0) * 0.5 * a0_inv,
+            a1: -2.0 * cos_w0 * a0_inv,
+            a2: (1.0 - alpha) * a0_inv,
+            x1: 0.0,
+            x2: 0.0,
+            y1: 0.0,
+            y2: 0.0,
+        }
+    }
+
+    /// Process one sample.
+    pub fn step(&mut self, x: f32) -> f32 {
+        let y = self.b0 * x + self.b1 * self.x1 + self.b2 * self.x2
+            - self.a1 * self.y1
+            - self.a2 * self.y2;
+        self.x2 = self.x1;
+        self.x1 = x;
+        self.y2 = self.y1;
+        self.y1 = y;
+        y
+    }
+}
+
+/// DC-blocking high-pass applied independently to I and Q of a complex
+/// baseband stream.  Two separate `BiquadHpf` instances preserve per-channel
+/// state across chunk boundaries.
+///
+/// See `docs/DSP.md` §6.
+pub struct ComplexDcBlocker {
+    i: BiquadHpf,
+    q: BiquadHpf,
+}
+
+impl ComplexDcBlocker {
+    /// High-pass at `cutoff_hz` on both I and Q at `sample_rate_hz`.
+    pub fn new(cutoff_hz: f32, sample_rate_hz: f32) -> Self {
+        Self {
+            i: BiquadHpf::new(cutoff_hz, sample_rate_hz),
+            q: BiquadHpf::new(cutoff_hz, sample_rate_hz),
+        }
+    }
+
+    /// Process one complex sample.
+    pub fn step(&mut self, x: Complex<f32>) -> Complex<f32> {
+        Complex::new(self.i.step(x.re), self.q.step(x.im))
+    }
+}
+
 /// Two cascaded `BiquadBpf` stages (4th-order bandpass).
 ///
 /// Used for CW to achieve ~20 dB/octave selectivity — sufficient to suppress
@@ -514,6 +589,38 @@ mod tests {
         for (i, y) in out.iter().enumerate().skip(8) {
             assert!((*y - 0.25).abs() < 1e-4, "sample {i} = {y}");
         }
+    }
+
+    #[test]
+    fn biquad_hpf_blocks_dc() {
+        // Constant input (pure DC) must converge toward zero.
+        let mut hpf = BiquadHpf::new(10.0, 16_000.0);
+        let mut buf = vec![1.0_f32; 8192];
+        for s in buf.iter_mut() {
+            *s = hpf.step(*s);
+        }
+        assert!(
+            buf.last().copied().unwrap().abs() < 1e-3,
+            "DC should be suppressed, got {}",
+            buf.last().unwrap()
+        );
+    }
+
+    #[test]
+    fn biquad_hpf_passes_voice_band() {
+        // 1 kHz tone at 16 kHz sample rate — well above the 10 Hz pole.
+        let fs = 16_000.0_f32;
+        let n = 4096_usize;
+        let warmup = 64_usize;
+        let mut hpf = BiquadHpf::new(10.0, fs);
+        let mut out = Vec::with_capacity(n);
+        for k in 0..n {
+            let x = (2.0 * PI * 1_000.0 * k as f32 / fs).cos();
+            out.push(hpf.step(x));
+        }
+        let peak = out[warmup..].iter().fold(0.0_f32, |a, &x| a.max(x.abs()));
+        // Gain at 1 kHz should be > 0.99 (< 0.09 dB attenuation).
+        assert!(peak > 0.9, "HPF should pass 1 kHz, got peak={peak}");
     }
 
     #[test]
