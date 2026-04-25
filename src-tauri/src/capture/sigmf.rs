@@ -38,6 +38,11 @@ pub struct SigMfGlobal {
     pub demod_mode: String,
     #[serde(rename = "rail:filter_bandwidth_hz")]
     pub filter_bandwidth_hz: u32,
+    /// Classifier label at the time of capture, e.g. `"WBFM"`. `None`
+    /// when no stream was running or the classifier produced no result.
+    /// See `docs/SIGNALS.md` §5.4.
+    #[serde(rename = "rail:signal_type_guess", skip_serializing_if = "Option::is_none")]
+    pub signal_type_guess: Option<String>,
 }
 
 /// Per-capture entry inside the `captures` array.
@@ -69,6 +74,9 @@ pub struct SigMfStartParams {
     pub demod_mode: String,
     pub filter_bandwidth_hz: u32,
     pub datetime_iso8601: String,
+    /// Classifier label at capture-start time. Forwarded verbatim into
+    /// `rail:signal_type_guess` in the finalized `.sigmf-meta`.
+    pub signal_type_guess: Option<String>,
 }
 
 /// Streaming writer: appends `cf32_le` bytes to `<data_path>` as samples
@@ -145,6 +153,7 @@ impl SigMfStreamWriter {
                 tuner_gain_db: self.params.tuner_gain_db,
                 demod_mode: self.params.demod_mode,
                 filter_bandwidth_hz: self.params.filter_bandwidth_hz,
+                signal_type_guess: self.params.signal_type_guess.clone(),
             },
             captures: vec![SigMfCapture {
                 sample_start: 0,
@@ -203,6 +212,7 @@ mod tests {
             demod_mode: "FM".into(),
             filter_bandwidth_hz: 200_000,
             datetime_iso8601: "2024-01-01T12:00:00Z".into(),
+            signal_type_guess: Some("WBFM".into()),
         }
     }
 

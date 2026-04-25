@@ -134,8 +134,10 @@ export type StartIqCaptureReply = {
   suggestedName: string;
 };
 
-export const startIqCapture = (): Promise<StartIqCaptureReply> =>
-  invoke<StartIqCaptureReply>("start_iq_capture");
+export const startIqCapture = (
+  signalTypeGuess?: string | null,
+): Promise<StartIqCaptureReply> =>
+  invoke<StartIqCaptureReply>("start_iq_capture", { signalTypeGuess: signalTypeGuess ?? null });
 
 export type StopIqCaptureReply = {
   tempMetaPath: string;

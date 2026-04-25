@@ -16,6 +16,8 @@ export const ModeSelector = () => {
     return classes.join(" ");
   };
 
+  const suggestedLabel = classification?.confirmed ?? classification?.candidates[0] ?? null;
+
   return (
     <div className="mode-selector" role="radiogroup" aria-label="Demodulator mode">
       <span className="mode-selector-label">Mode</span>
@@ -47,6 +49,14 @@ export const ModeSelector = () => {
           </button>
         ))}
       </div>
+      {suggestedLabel && (
+        <span
+          className="mode-suggested-badge"
+          title={classification?.reason ?? ""}
+        >
+          {suggestedLabel}
+        </span>
+      )}
     </div>
   );
 };

@@ -1,13 +1,26 @@
 import { useEffect, useRef, useState } from "react";
+import { Channel } from "@tauri-apps/api/core";
 
 import type { Bookmark } from "../../ipc/commands";
+import { startScan } from "../../ipc/commands";
 import { useBookmarksStore } from "../../store/bookmarks";
 import { useCaptureStore } from "../../store/capture";
 import { useRadioStore } from "../../store/radio";
 import { useReplayStore } from "../../store/replay";
 import { useScannerStore } from "../../store/scanner";
 
-type MenuKey = "file" | "view" | "bookmarks" | "capture";
+type MenuKey = "file" | "view" | "bookmarks" | "capture" | "bands" | "settings";
+
+type Band = { label: string; centerHz: number; scanRangeHz: number };
+
+const BANDS: Band[] = [
+  { label: "FM Broadcast", centerHz: 98_000_000, scanRangeHz: 10_000_000 },
+  { label: "Aviation", centerHz: 121_500_000, scanRangeHz: 10_000_000 },
+  { label: "Maritime VHF", centerHz: 156_800_000, scanRangeHz: 10_000_000 },
+  { label: "2m Amateur", centerHz: 144_200_000, scanRangeHz: 10_000_000 },
+  { label: "ISM 433", centerHz: 433_920_000, scanRangeHz: 10_000_000 },
+  { label: "PMR446", centerHz: 446_000_000, scanRangeHz: 10_000_000 },
+];
 
 const BOOKMARK_FILE_VERSION = 1;
 const BOOKMARK_EXPORT_NAME = "rail-bookmarks.json";
@@ -54,6 +67,11 @@ export const MenuBar = () => {
   const frequencyHz = useRadioStore((s) => s.frequencyHz);
   const setFrequency = useRadioStore((s) => s.setFrequency);
   const streaming = useRadioStore((s) => s.streaming);
+  const squelchDbfs = useRadioStore((s) => s.squelchDbfs);
+  const autoApplyMode = useRadioStore((s) => s.autoApplyMode);
+  const setAutoApplyMode = useRadioStore((s) => s.setAutoApplyMode);
+  const classifierEnabled = useRadioStore((s) => s.classifierEnabled);
+  const setClassifierEnabled = useRadioStore((s) => s.setClassifierEnabled);
   const recordingAudio = useCaptureStore((s) => s.recordingAudio);
   const recordingIq = useCaptureStore((s) => s.recordingIq);
   const startAudio = useCaptureStore((s) => s.startAudio);
@@ -186,6 +204,42 @@ export const MenuBar = () => {
     setOpen(null);
   };
 
+  const handleBandClick = async (band: Band) => {
+    setOpen(null);
+    if (!streaming) return;
+    useRadioStore.getState().setFrequency(band.centerHz);
+    if (!classifierEnabled) return;
+    const startHz = Math.max(500_000, band.centerHz - band.scanRangeHz);
+    const stopHz = band.centerHz + band.scanRangeHz;
+    const scannerStore = useScannerStore.getState();
+    scannerStore.setScanConfig({
+      startHz,
+      stopHz,
+      stepHz: 200_000,
+      dwellMs: 200,
+      thresholdDbfs: -70,
+    });
+    if (!scannerStore.visible) scannerStore.toggleVisible();
+    const channel = new Channel<ArrayBuffer>();
+    try {
+      const reply = await startScan(
+        { startHz, stopHz, stepHz: 200_000, dwellMs: 200, squelchDbfs },
+        channel,
+      );
+      useScannerStore.getState().beginScan(reply.frequenciesHz);
+      const freqs = reply.frequenciesHz;
+      channel.onmessage = (buffer: ArrayBuffer) => {
+        const dbfs = new DataView(buffer).getFloat32(0, true);
+        const idx = useScannerStore.getState().results.length;
+        if (idx < freqs.length) {
+          useScannerStore.getState().pushResult({ frequencyHz: freqs[idx], peakDbfs: dbfs });
+        }
+      };
+    } catch (err) {
+      console.warn("[RAIL] band scan failed:", err);
+    }
+  };
+
   const handleAdd = () => {
     const name = window.prompt("Bookmark name", formatFrequency(frequencyHz));
     if (name === null) {
@@ -241,12 +295,70 @@ export const MenuBar = () => {
           </div>
         )}
       </div>
-      <button type="button" className="menu-top" disabled aria-disabled="true">
-        Settings
-      </button>
-      <button type="button" className="menu-top" disabled aria-disabled="true">
-        Tools
-      </button>
+      <div className="menu-group">
+        <button
+          type="button"
+          className={open === "bands" ? "menu-top menu-top-open" : "menu-top"}
+          aria-haspopup="menu"
+          aria-expanded={open === "bands"}
+          onClick={() => toggle("bands")}
+        >
+          Bands
+        </button>
+        {open === "bands" && (
+          <div className="menu-dropdown menu-dropdown-left" role="menu">
+            {BANDS.map((band) => (
+              <button
+                key={band.label}
+                type="button"
+                role="menuitem"
+                className="menu-item"
+                disabled={!streaming}
+                onClick={() => { void handleBandClick(band); }}
+              >
+                {band.label}
+                <span className="menu-item-freq">
+                  {(band.centerHz / 1e6).toFixed(1)} MHz
+                </span>
+              </button>
+            ))}
+            <div className="menu-separator" role="separator" />
+            <label className="menu-item menu-item-check">
+              <input
+                type="checkbox"
+                checked={classifierEnabled}
+                onChange={(e) => setClassifierEnabled(e.target.checked)}
+              />
+              Signal autodetection
+            </label>
+          </div>
+        )}
+      </div>
+      <div className="menu-group">
+        <button
+          type="button"
+          className={open === "settings" ? "menu-top menu-top-open" : "menu-top"}
+          aria-haspopup="menu"
+          aria-expanded={open === "settings"}
+          onClick={() => toggle("settings")}
+        >
+          Settings
+        </button>
+        {open === "settings" && (
+          <div className="menu-dropdown menu-dropdown-left" role="menu">
+            <label className="menu-item menu-item-check">
+              <input
+                type="checkbox"
+                checked={autoApplyMode}
+                onChange={(e) => {
+                  setAutoApplyMode(e.target.checked);
+                }}
+              />
+              Auto-apply suggested mode
+            </label>
+          </div>
+        )}
+      </div>
       <div className="menu-group">
         <button
           type="button"

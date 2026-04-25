@@ -231,6 +231,7 @@ pub struct StartIqCaptureReply {
 pub async fn start_iq_capture<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, AppState>,
+    signal_type_guess: Option<String>,
 ) -> Result<StartIqCaptureReply, RailError> {
     let radio = radio_snapshot(&state)?;
     let data_temp = new_tmp_path(&app, "sigmf-data")?;
@@ -247,6 +248,7 @@ pub async fn start_iq_capture<R: Runtime>(
         demod_mode: radio.mode.clone(),
         filter_bandwidth_hz: radio.bandwidth_hz,
         datetime_iso8601: iso8601_compact(now_secs()?),
+        signal_type_guess,
     };
     tx.send(CaptureControl::StartIq {
         meta_path: meta_temp.clone(),

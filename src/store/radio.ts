@@ -73,6 +73,14 @@ export type RadioState = {
   setZoom: (zoom: number) => void;
   setSignalLevel: (level: SignalLevel | null) => void;
   setClassification: (c: SignalClassificationPayload | null) => void;
+  /// When `true`, a confirmed classifier result automatically selects
+  /// the demodulation mode on each classification event. Off by default.
+  autoApplyMode: boolean;
+  setAutoApplyMode: (v: boolean) => void;
+  /// When `false`, signal-classification events are ignored and the
+  /// suggested-mode badge is hidden. On by default.
+  classifierEnabled: boolean;
+  setClassifierEnabled: (v: boolean) => void;
 };
 
 const RETUNE_DEBOUNCE_MS = 30;
@@ -157,6 +165,8 @@ export const useRadioStore = create<RadioState>((set, get) => ({
   zoom: 1,
   signalLevel: null,
   classification: null,
+  autoApplyMode: false,
+  classifierEnabled: true,
   setFrequency: (frequencyHz) => {
     // Replay sessions are locked to the capture's center frequency; the
     // backend would reject any retune with `InvalidParameter` anyway, so
@@ -218,4 +228,9 @@ export const useRadioStore = create<RadioState>((set, get) => ({
   },
   setSignalLevel: (signalLevel) => set({ signalLevel }),
   setClassification: (classification) => set({ classification }),
+  setAutoApplyMode: (autoApplyMode) => set({ autoApplyMode }),
+  setClassifierEnabled: (classifierEnabled) => {
+    set({ classifierEnabled });
+    if (!classifierEnabled) set({ classification: null });
+  },
 }));

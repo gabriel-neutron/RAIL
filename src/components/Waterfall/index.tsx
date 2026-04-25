@@ -163,7 +163,8 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
 
   // Register a PNG screenshot source with the capture store so the
   // "save screenshot" menu entry can grab the waterfall without
-  // reaching into component refs.
+  // reaching into component refs. A 32 px header bar is composited
+  // on top with center frequency, timestamp, and classifier label.
   useEffect(() => {
     const provider = () =>
       new Promise<Blob | null>((resolve) => {
@@ -172,7 +173,30 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
           resolve(null);
           return;
         }
-        canvas.toBlob((blob) => resolve(blob), "image/png");
+        const HEADER_H = 32;
+        const off = document.createElement("canvas");
+        off.width = canvas.width;
+        off.height = canvas.height + HEADER_H;
+        const ctx = off.getContext("2d");
+        if (!ctx) {
+          canvas.toBlob((blob) => resolve(blob), "image/png");
+          return;
+        }
+        // Header bar
+        ctx.fillStyle = "#0d1117";
+        ctx.fillRect(0, 0, off.width, HEADER_H);
+        // Waterfall content below header
+        ctx.drawImage(canvas, 0, HEADER_H);
+        // Overlay text
+        const { frequencyHz, classification, sampleRateHz } = useRadioStore.getState();
+        const freqMhz = (frequencyHz / 1e6).toFixed(3);
+        const spanMhz = (sampleRateHz / 1e6).toFixed(3);
+        const ts = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
+        const label = classification?.confirmed ?? classification?.candidates[0] ?? "";
+        ctx.fillStyle = "#c9d1d9";
+        ctx.font = "bold 13px monospace";
+        ctx.fillText(`${freqMhz} MHz  ±${spanMhz} MHz  ${ts}${label ? `  [${label}]` : ""}`, 8, 21);
+        off.toBlob((blob) => resolve(blob), "image/png");
       });
     useCaptureStore.getState().setScreenshotProvider(provider);
     return () => {

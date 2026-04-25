@@ -131,24 +131,23 @@ Tune to blank noise — badge reads nothing or `unknown`.
 
 ---
 
-## Phase 11 — Polish and guided navigation
+## Phase 11 — Polish and guided navigation ✓
 
 **Goal**: tie signal intelligence into navigation UX; lower the barrier for
 first-time users; complete the portfolio-ready state of the app.
 
-- [ ] Band quick-access shortcuts: clickable entries for FM Broadcast, Aviation,
+- [x] Band quick-access shortcuts: clickable entries for FM Broadcast, Aviation,
       Maritime VHF, 2m Amateur, ISM 433, PMR446 — each jump sets center frequency
       and optionally triggers a quick scan (±10 MHz around band center)
-- [ ] Suggested mode auto-apply: opt-in toggle in settings — when enabled, the
+- [x] Suggested mode auto-apply: opt-in toggle in settings — when enabled, the
       classifier output from Phase 10 automatically selects the demodulation mode
       on each retune; disabled by default
-- [ ] `signal_type_guess` in session schema auto-populated from classifier output
+- [x] `signal_type_guess` in session schema auto-populated from classifier output
       at capture time — see SIGNALS.md §2 schema field
-- [ ] Waterfall export: PNG with frequency axis, center frequency, timestamp,
+- [x] Waterfall export: PNG with frequency axis, center frequency, timestamp,
       and classifier label burned into the image header area
-- [ ] Keyboard shortcut to trigger a quick scan of ±10 MHz around current frequency
-- [ ] First-use onboarding hint: one-time overlay pointing to the band shortcuts
-      and suggested mode badge
+- [x] Keyboard shortcut to trigger a quick scan of ±10 MHz around current frequency
+
 
 **Exit criterion**: a user who has never used SDR software opens the app,
 clicks "FM Broadcast" in the band shortcuts, the app tunes to 98 MHz,

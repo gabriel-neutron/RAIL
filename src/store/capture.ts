@@ -21,6 +21,7 @@ import {
   stopAudioCapture,
   stopIqCapture,
 } from "../ipc/commands";
+import { useRadioStore } from "./radio";
 
 type ScreenshotProvider = () => Promise<Blob | null>;
 
@@ -103,7 +104,8 @@ export const useCaptureStore = create<CaptureState>((set, get) => ({
   startIq: async () => {
     if (get().recordingIq) return;
     try {
-      await startIqCapture();
+      const guess = useRadioStore.getState().classification?.confirmed ?? null;
+      await startIqCapture(guess);
       set({ recordingIq: true });
     } catch (err) {
       logError("start IQ capture failed", err);

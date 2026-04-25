@@ -201,13 +201,19 @@ function App() {
     }
   }, [streamEnabled]);
 
-  // Signal classification feeds the ModeSelector button colors.
+  // Signal classification feeds the ModeSelector button colors and,
+  // when auto-apply is enabled, selects the demodulation mode.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
 
     void subscribeSignalClassification((payload) => {
-      useRadioStore.getState().setClassification(payload);
+      const store = useRadioStore.getState();
+      if (!store.classifierEnabled) return;
+      store.setClassification(payload);
+      if (store.autoApplyMode && payload.confirmed) {
+        store.setMode(payload.confirmed as Parameters<typeof store.setMode>[0]);
+      }
     }).then((fn) => {
       if (cancelled) {
         fn();

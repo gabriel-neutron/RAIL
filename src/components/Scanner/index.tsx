@@ -19,17 +19,39 @@ export const Scanner = () => {
   const results = useScannerStore((s) => s.results);
   const beginScan = useScannerStore((s) => s.beginScan);
   const endScan = useScannerStore((s) => s.endScan);
+  const scanConfig = useScannerStore((s) => s.scanConfig);
+  const scanConfigSeq = useScannerStore((s) => s.scanConfigSeq);
 
-  const [startMhz, setStartMhz] = useState("87.5");
-  const [stopMhz, setStopMhz] = useState("108.0");
-  const [stepKhz, setStepKhz] = useState("200");
-  const [dwellMs, setDwellMs] = useState("200");
-  const [thresholdDbfs, setThresholdDbfs] = useState("-70");
+  const [startMhz, setStartMhz] = useState(() =>
+    (scanConfig.startHz / 1e6).toFixed(1),
+  );
+  const [stopMhz, setStopMhz] = useState(() =>
+    (scanConfig.stopHz / 1e6).toFixed(1),
+  );
+  const [stepKhz, setStepKhz] = useState(() =>
+    String(Math.round(scanConfig.stepHz / 1e3)),
+  );
+  const [dwellMs, setDwellMs] = useState(() => String(scanConfig.dwellMs));
+  const [thresholdDbfs, setThresholdDbfs] = useState(() =>
+    String(scanConfig.thresholdDbfs),
+  );
   const [statusText, setStatusText] = useState("Idle");
   const [selectedIdx, setSelectedIdx] = useState(-1);
 
+  // When a band-menu click pushes new config, sync the form fields.
+  // scanConfigSeq changes only on external setScanConfig calls, not on
+  // user edits, so this never fights with in-progress typing.
+  useEffect(() => {
+    setStartMhz((scanConfig.startHz / 1e6).toFixed(1));
+    setStopMhz((scanConfig.stopHz / 1e6).toFixed(1));
+    setStepKhz(String(Math.round(scanConfig.stepHz / 1e3)));
+    setDwellMs(String(scanConfig.dwellMs));
+    setThresholdDbfs(String(scanConfig.thresholdDbfs));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanConfigSeq]);
+
   // Ref so event callbacks always see the current threshold.
-  const thresholdRef = useRef(-70);
+  const thresholdRef = useRef(scanConfig.thresholdDbfs);
   useEffect(() => {
     const v = parseFloat(thresholdDbfs);
     thresholdRef.current = Number.isFinite(v) ? v : -70;

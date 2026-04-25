@@ -1,6 +1,9 @@
 import { useEffect } from "react";
+import { Channel } from "@tauri-apps/api/core";
 
+import { startScan } from "../ipc/commands";
 import { UNIT_SCALE, useRadioStore } from "../store/radio";
+import { useScannerStore } from "../store/scanner";
 
 /// Predicate: is focus on something that legitimately eats ArrowUp/Down
 /// (a text input, textarea, select, or contenteditable region)?
@@ -14,12 +17,13 @@ const isTypingTarget = (el: Element | null): boolean => {
 };
 
 /**
- * Global keyboard shortcuts for frequency tuning.
+ * Global keyboard shortcuts for frequency tuning and scanning.
  *
- * - `ArrowUp`   : +1 × selected unit
- * - `ArrowDown` : -1 × selected unit
- * - `Shift + Arrow` : ×10
- * - `Ctrl  + Arrow` : ×100
+ * - `ArrowUp`        : +1 × selected unit
+ * - `ArrowDown`      : -1 × selected unit
+ * - `Shift + Arrow`  : ×10
+ * - `Ctrl  + Arrow`  : ×100
+ * - `Ctrl+Shift+S`   : quick scan ±10 MHz around current frequency
  *
  * Ignored while an input/textarea/select/contenteditable holds focus so
  * typing a name or a frequency stays uninterrupted.
@@ -27,6 +31,38 @@ const isTypingTarget = (el: Element | null): boolean => {
 export const useKeyboardTuning = (): void => {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+Shift+S — quick scan ±10 MHz.
+      if (e.key === "S" && e.ctrlKey && e.shiftKey) {
+        e.preventDefault();
+        const { frequencyHz, squelchDbfs, streaming, classifierEnabled } = useRadioStore.getState();
+        if (!streaming || !classifierEnabled) return;
+        const RANGE_HZ = 10_000_000;
+        const startHz = Math.max(500_000, frequencyHz - RANGE_HZ);
+        const stopHz = frequencyHz + RANGE_HZ;
+        const stepHz = 200_000;
+        const scannerStore = useScannerStore.getState();
+        scannerStore.setScanConfig({ startHz, stopHz, stepHz, dwellMs: 200, thresholdDbfs: -70 });
+        if (!scannerStore.visible) scannerStore.toggleVisible();
+        const channel = new Channel<ArrayBuffer>();
+        void startScan(
+          { startHz, stopHz, stepHz, dwellMs: 200, squelchDbfs },
+          channel,
+        ).then((reply) => {
+          useScannerStore.getState().beginScan(reply.frequenciesHz);
+          const freqs = reply.frequenciesHz;
+          channel.onmessage = (buffer: ArrayBuffer) => {
+            const dbfs = new DataView(buffer).getFloat32(0, true);
+            const idx = useScannerStore.getState().results.length;
+            if (idx < freqs.length) {
+              useScannerStore.getState().pushResult({ frequencyHz: freqs[idx], peakDbfs: dbfs });
+            }
+          };
+        }).catch((err) => {
+          console.warn("[RAIL] quick scan failed:", err);
+        });
+        return;
+      }
+
       if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
       if (isTypingTarget(document.activeElement)) return;
       e.preventDefault();
