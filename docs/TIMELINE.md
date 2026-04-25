@@ -1,155 +1,145 @@
 # TIMELINE.md — Development Phases and Milestones
 
-> This timeline is task-ordered, not time-boxed.
-> Each phase must be fully working and committed before starting the next.
-> Claude Code builds one phase at a time. Do not jump ahead.
+> Task-ordered, not time-boxed. Each phase must be fully working and committed before starting the next.
 
 ## Table of contents
-1. [Phase 0 — Project scaffold](#phase-0--project-scaffold-and-prerequisites-)
-2. [Phase 1 — IQ stream and waterfall](#phase-1--iq-stream-and-waterfall-)
-3. [Phase 2 — Frequency control and tuning](#phase-2--frequency-control-and-tuning-)
-4. [Phase 3 — Demodulation and audio](#phase-3--demodulation-and-audio-)
-5. [Phase 4 — Signal meter and UI polish](#phase-4--signal-meter-and-ui-polish-)
-6. [Phase 5 — Capture and session system](#phase-5--capture-and-session-system-)
-7. [Phase 6 — V1 hardening](#phase-6--v1-hardening-)
-8. [Phase 7 — Code compliance and first release](#phase-7--code-compliance-and-first-release)
-9. [Phase 8 — Demodulation expansion](#phase-8--demodulation-expansion)
-10. [Phase 9 — Wideband scanner](#phase-9--wideband-scanner)
-11. [Phase 10 — Signal intelligence layer](#phase-10--signal-intelligence-layer)
-12. [Phase 11 — Polish and guided navigation](#phase-11--polish-and-guided-navigation)
+1. [Phases 0–11 — Completed](#phases-011--completed-)
+2. [Phase 12 — DSP correctness](#phase-12--dsp-correctness)
+3. [Phase 13 — Documentation and presentation](#phase-13--documentation-and-presentation)
+4. [Phase 14 — UX improvements](#phase-14--ux-improvements)
+5. [Phase 15 — Coverage and classifier expansion](#phase-15--coverage-and-classifier-expansion)
+6. [Phase 16 — Advanced DSP](#phase-16--advanced-dsp)
+7. [What not to build](#what-not-to-build)
 
 ---
 
-## Phase 0 — Project scaffold and prerequisites ✓
+## Phases 0–11 — Completed ✓
 
-## Phase 1 — IQ stream and waterfall ✓
-
-## Phase 2 — Frequency control and tuning ✓
-
-## Phase 3 — Demodulation and audio ✓
-
-## Phase 4 — Signal meter and UI polish ✓
-
-## Phase 5 — Capture and session system ✓
-
-## Phase 6 — V1 hardening ✓
-
----
-
-## Phase 7 — Code compliance and first release ✓
-
-**Goal**: close the gap between Phase 6 checklist and actual state; ship v0.1.0 to GitHub.
-
-- [x] Replace all non-test `unwrap()` calls in DSP modules with `.expect("reason")`
-      or `?` propagation — files: `dsp/am.rs`, `dsp/fft.rs`, `dsp/filter.rs`, `dsp/waterfall.rs`
-- [x] Add table of contents to `docs/TECH_STACK.md` (183 lines, rule: >~150 lines requires TOC)
-- [x] Add table of contents to `docs/PRD.md` (155 lines, rule: >~150 lines requires TOC)
-- [x] Add quick-start section to `README.md`: prerequisites + install command + run command
-- [x] Add `LICENSE` file (MIT)
-- [x] `git tag v0.1.0 && git push origin v0.1.0`
-      → GitHub Actions `release.yml` builds all installers and publishes the release automatically
-
-**Exit criterion**: GitHub release page exists at `releases/tag/v0.1.0`,
-`.exe` installer is downloadable, CI is green on the tag.
+| Phase | Summary |
+|---|---|
+| 0 | Project scaffold and prerequisites |
+| 1 | IQ stream and waterfall |
+| 2 | Frequency control and tuning |
+| 3 | Demodulation and audio |
+| 4 | Signal meter and UI polish |
+| 5 | Capture and session system |
+| 6 | V1 hardening |
+| 7 | Code compliance and first release |
+| 8 | Demodulation expansion (NFM, USB, LSB, CW) |
+| 9 | Wideband scanner |
+| 10 | Signal intelligence layer |
+| 11 | Polish and guided navigation |
 
 ---
 
-## Phase 8 — Demodulation expansion ✓
+## Phase 12 — DSP correctness
 
-**Goal**: user can demodulate narrow FM, upper and lower sideband, and CW signals —
-opening aviation repeaters, maritime voice, PMR446, ham radio SSB, and Morse.
+This phase is based on `@REVIEW.md`, read it for extra details.
 
-- [x] NFM demodulation (narrow FM): FM discriminator with 12.5 kHz filter
-      — same FM math as WBFM but with a narrower channel filter; see DSP.md §4
-- [x] De-emphasis for NFM (300–3000 Hz voice shelf, not the 50/75 µs WBFM curve)
-- [x] USB demodulation (upper sideband SSB): analytic signal shift + filter; see DSP.md §6
-- [x] LSB demodulation (lower sideband SSB): mirror of USB
-- [x] CW demodulation: USB phasing + 4th-order 700 Hz BPF (±200 Hz); see DSP.md §6
-- [x] Mode selector updated: `FM | NFM | AM | USB | LSB | CW`
-- [x] Filter bandwidth presets per mode:
-      FM → 200 kHz, NFM → 12.5 kHz, AM → 10 kHz, USB/LSB → 2.7 kHz, CW → 500 Hz
-- [x] Squelch threshold recalibrated for NFM noise floor (different from WBFM)
+**Goal**: fix the P0 bug that makes every dB reading in the app ~6 dB low.
 
-**Exit criterion**: tune to 156.800 MHz (maritime VHF channel 16), select NFM,
-hear voice or carrier. Tune to 144.200 MHz (2m SSB calling), select USB, hear SSB voice.
+- [ ] **Fix FFT window coherent gain** — `dsp/fft.rs` line ~74
+      Replace `self.norm = n as f32` with `self.norm = window.iter().sum::<f32>()`
+      *(1 h)*
+- [ ] **Add FFT normalization unit test** — `dsp/fft.rs` `#[cfg(test)]`
+      Full-scale complex tone at known frequency must peak at 0 ±0.5 dBFS
+      *(1 h)*
+- [ ] **Recheck classifier thresholds** — `classifier.rs`
+      Re-run classifier tests after normalization fix; adjust `env_var` / `asym` constants if readings shifted
+      *(30 min)*
 
----
-
-## Phase 9 — Wideband scanner ✓
-
-**Goal**: user can sweep a frequency range and auto-discover active signals
-without manually stepping through frequencies.
-
-- [x] Scanner engine in Rust: configurable start freq, stop freq, step size, dwell time
-- [x] Sequential tuning loop: `tune → wait dwell → measure peak power → advance`
-- [x] Scan-stop condition: peak power exceeds squelch threshold during dwell
-- [x] Sweep result emitted as a float32 power-per-step array via binary Tauri channel
-- [x] Band activity canvas in React: horizontal bar showing power across scanned range,
-      same colormap as waterfall
-- [x] Active-signal markers overlaid on band activity (vertical lines at peaks)
-- [x] User controls: start/stop, step size (default 200 kHz), dwell time (default 200 ms),
-      scan range input, adjustable squelch threshold
-- [x] Click-to-tune on band activity canvas: clicking a marker tunes the main receiver
-- [x] Chevron navigation (‹/›) between detected signals above threshold
-- [x] Waterfall floor/ceiling sliders + temporal EMA smoothing for noise suppression
-- [x] Raw IQ RMS power measurement (not demod audio) to avoid FM discriminator noise floor
-
-**Exit criterion**: scanner sweeps 87–108 MHz in 200 kHz steps,
-the band activity canvas fills with power levels, active FM stations appear as peaks,
-clicking a peak tunes the receiver and the waterfall updates.
+**Exit criterion**: `cargo test` passes; 0 dBFS test tone peaks within ±0.5 dB of 0 dBFS in FFT output.
 
 ---
 
-## Phase 10 — Signal intelligence layer ✓
+## Phase 13 — Documentation and presentation
 
-> **Prerequisite**: read `docs/SIGNALS.md` §4 (receivable signal reference by band)
-> and §5 (classification heuristics) in full before writing any detection or
-> classification code. All classifier logic must cite SIGNALS.md §5, not restate it.
+This phase is based on `@REVIEW.md`, read it for extra details.
 
-**Goal**: the app detects, measures, and classifies signals automatically —
-emitting a structured suggestion the UI can display without the user selecting a mode.
+**Goal**: close the presentation gap — recruiter and hobbyist can evaluate the project without building it.
 
-- [x] Peak detector in Rust: find local maxima in FFT magnitude above estimated noise floor
-      — see DSP.md §2 for magnitude pipeline
-- [x] Bandwidth estimator: measure –3 dB width around each detected peak
-- [x] Envelope variance measurement: discriminate AM from FM family
-      — see SIGNALS.md §5.2 and DSP.md §4–5 for signal math
-- [x] Spectral flatness measurement: discriminate analog from digital signals
-      — see SIGNALS.md §5.2
-- [x] Frequency prior lookup: match current center frequency against band table
-      in SIGNALS.md §5.3
-- [x] Combine heuristic result + frequency prior into confidence-scored label
-- [x] Output contract: emit `{label, confidence, reason}` per SIGNALS.md §5.4
-      as a low-rate JSON Tauri event (not binary)
-- [x] Frontend: "Suggested mode" badge near mode selector
-      — shows label and confidence, tooltip shows `reason`
-      — badge is display only; does not change the active mode automatically
+- [ ] **Rewrite README opening** — `README.md`
+      Drop "educational build"; lead with capabilities + tech proof points (hand-written librtlsdr FFI, Hilbert FIR, three-path classifier, SigMF capture); screenshot above the fold; add one-paragraph "Intelligence value" section
+      *(1 h)*
+- [ ] **Add SIGNALS.md §6 — Classifier design note** — `docs/SIGNALS.md`
+      200–300 words: why frequency prior dominates, why `asym=15 dB`, next analytical steps (per-peak dwell, protocol decoder integration, TDOA with multiple receivers)
+      *(1–2 h)*
+- [ ] **Verify or publish GitHub release** — git + `release.yml`
+      Confirm tag `v0.1.0` exists and `.exe` installer is downloadable; if missing, `git tag v0.1.0 && git push origin v0.1.0` and confirm CI build succeeds
+      *(30 min–1 h)*
+- [ ] **Add field-validation screenshots** — `docs/assets/field/`, `README.md` *(requires hardware session)*
+      Capture classifier badge on: FM broadcast (WBFM), ATC/AM, maritime VHF (NFM); add "Field results" section to README
+      *(2–4 h)*
 
-**Exit criterion**: tune to 98 MHz without selecting a mode — badge reads
-`WBFM — high confidence`. Tune to 156.800 MHz — badge reads `NBFM — high confidence`.
-Tune to blank noise — badge reads nothing or `unknown`.
+**Exit criterion**: README leads with capabilities; installer is downloadable; SIGNALS.md §6 exists; at least one field screenshot is in the repo.
 
 ---
 
-## Phase 11 — Polish and guided navigation ✓
+## Phase 14 — UX improvements
 
-**Goal**: tie signal intelligence into navigation UX; lower the barrier for
-first-time users; complete the portfolio-ready state of the app.
+This phase is based on `@REVIEW.md`, read it for extra details.
 
-- [x] Band quick-access shortcuts: clickable entries for FM Broadcast, Aviation,
-      Maritime VHF, 2m Amateur, ISM 433, PMR446 — each jump sets center frequency
-      and optionally triggers a quick scan (±10 MHz around band center)
-- [x] Suggested mode auto-apply: opt-in toggle in settings — when enabled, the
-      classifier output from Phase 10 automatically selects the demodulation mode
-      on each retune; disabled by default
-- [x] `signal_type_guess` in session schema auto-populated from classifier output
-      at capture time — see SIGNALS.md §2 schema field
-- [x] Waterfall export: PNG with frequency axis, center frequency, timestamp,
-      and classifier label burned into the image header area
-- [x] Keyboard shortcut to trigger a quick scan of ±10 MHz around current frequency
+**Goal**: surface backend features that are fully implemented but missing from the UI.
 
+- [ ] **Add squelch slider** — `App.tsx` + new `SquelchControl.tsx` component
+      Range: −100 to 0 dBFS, "disabled" position at minimum; calls `setSquelchDbfs` store action
+      Position: between AudioControls and PpmControl
+      *(2 h)*
+- [ ] **Extend bookmarks to store mode + bandwidth** — `bookmarks.rs`, `ipc/commands.rs`, `store/bookmarks.ts`
+      Add optional `mode: Option<String>` and `bandwidth_hz: Option<u32>` to `Bookmark`; apply on tune (missing fields = no change)
+      *(3 h)*
+- [ ] **Add DC offset annotation to waterfall** — `Waterfall.tsx`, `FrequencyAxis.tsx`
+      Status bar: `DC: ±{sampleRate/4} MHz`; thin annotation line on `FrequencyAxis` at `center_hz ± sample_rate/4`
+      *(1 h)*
 
-**Exit criterion**: a user who has never used SDR software opens the app,
-clicks "FM Broadcast" in the band shortcuts, the app tunes to 98 MHz,
-the suggested mode badge shows `WBFM`, and (if auto-apply is on) FM audio starts
-— without reading any documentation.
+**Exit criterion**: squelch slider visible and functional on NFM; tuning a bookmark restores mode and bandwidth; waterfall status bar shows DC offset.
+
+---
+
+## Phase 15 — Coverage and classifier expansion
+
+This phase is based on `@REVIEW.md`, read it for extra details.
+
+**Goal**: close test coverage gaps and expand the frequency prior to cover common scan targets.
+
+- [ ] **Add FM demodulator unit test** — `dsp/demod/fm.rs` `#[cfg(test)]`
+      Constant-phase-deviation IQ → assert audio amplitude within expected range; cite DSP.md §4
+      *(2 h)*
+- [ ] **Expand classifier frequency prior** — `classifier.rs` match arm
+      Add: NOAA weather radio (162.4–162.55 MHz), FRS/GMRS (462–467 MHz), MURS (151–154 MHz), public safety UHF (450–470 MHz), ACARS (129.125 MHz), DAB III (174–240 MHz)
+      *(2 h)*
+- [ ] **Fix scanner measurement** — `scanner.rs`, `ipc/dsp_task.rs`
+      Replace single `latest_dbfs_bits` poll with float array accumulating `max_dbfs_per_bin` over the full dwell window; enables burst detection and richer band-activity canvas
+      *(4–6 h)*
+
+**Exit criterion**: FM demod test passes; common bands return correct classifier labels; scanner catches sub-50 ms burst traffic.
+
+---
+
+## Phase 16 — Advanced DSP
+
+This phase is based on `@REVIEW.md`, read it for extra details.
+
+**Goal**: fix DSP correctness issues causing audible degradation on WBFM and SSB.
+
+- [ ] **DC-blocking IIR before SSB demodulator** — `dsp/demod/ssb.rs`
+      2-pole high-pass at ~10 Hz on complex baseband after decimation; eliminates I/Q DC bias before Hilbert phasing; see DSP.md §6
+      *(2–3 h)*
+- [ ] **Compensate audio LPF group delay in SSB** — `dsp/demod/ssb.rs`
+      The 65-tap LPF adds ~32 samples of delay to one path; delay-match the other path to eliminate harmonic distortion
+      *(2–4 h)*
+- [ ] **Multi-stage polyphase decimation for WBFM** — `dsp/filter.rs`, `dsp/demod/mod.rs`
+      Replace single 65-tap 8× decimator with 2-stage (2×4); first-stage filter ≥240 taps for −40 dB stopband at fold-over frequency (128 kHz)
+      *(8–12 h)*
+
+**Exit criterion**: WBFM audio free of aliasing artifacts; SSB test tone free of harmonic distortion; `cargo test` green.
+
+---
+
+## What not to build
+
+- **No `AtomicU64` for center frequency** — RTL-SDR tops at ~1.7 GHz; width is fine. Fix `Relaxed` ordering via coordinated channel message if needed.
+- **No third-party UI component library** — the custom UI is a demonstrable technical skill; adding Material-UI erases that signal.
+- **No AI-based signal classification in v1** — the heuristic classifier is the right scope; a Burn/TFLite model expands scope without proving more competence.
+- **No IPC framing header as P0** — Tauri v2 channel semantics make practical coalescing unlikely; revisit only if frame corruption is observed.
+- **Do not expand internal docs** — ARCHITECTURE.md and DSP.md are already unusually thorough; field results and a rewritten README move the portfolio needle more.
