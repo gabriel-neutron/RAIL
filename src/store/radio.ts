@@ -7,6 +7,7 @@ import {
   setSquelch as setSquelchCmd,
   type DemodModeWire,
 } from "../ipc/commands";
+import { type SignalClassificationPayload } from "../ipc/events";
 import { useReplayStore } from "./replay";
 
 export type DemodMode = "FM" | "NFM" | "AM" | "USB" | "LSB" | "CW";
@@ -53,6 +54,9 @@ export type RadioState = {
   /// Latest dBFS level snapshot from the backend; `null` before the
   /// first event arrives (e.g. no stream yet).
   signalLevel: SignalLevel | null;
+  /// Latest signal classification from the backend; `null` when no signal
+  /// is above the noise floor or no stream is running.
+  classification: SignalClassificationPayload | null;
   setFrequency: (hz: number) => void;
   setSampleRate: (hz: number) => void;
   setMode: (mode: DemodMode) => void;
@@ -68,6 +72,7 @@ export type RadioState = {
   setSquelchDbfs: (db: number | null) => void;
   setZoom: (zoom: number) => void;
   setSignalLevel: (level: SignalLevel | null) => void;
+  setClassification: (c: SignalClassificationPayload | null) => void;
 };
 
 const RETUNE_DEBOUNCE_MS = 30;
@@ -151,6 +156,7 @@ export const useRadioStore = create<RadioState>((set, get) => ({
   squelchDbfs: null,
   zoom: 1,
   signalLevel: null,
+  classification: null,
   setFrequency: (frequencyHz) => {
     // Replay sessions are locked to the capture's center frequency; the
     // backend would reject any retune with `InvalidParameter` anyway, so
@@ -211,4 +217,5 @@ export const useRadioStore = create<RadioState>((set, get) => ({
     set({ zoom: clamped });
   },
   setSignalLevel: (signalLevel) => set({ signalLevel }),
+  setClassification: (classification) => set({ classification }),
 }));

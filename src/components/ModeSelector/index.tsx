@@ -6,6 +6,15 @@ const STUBBED_MODES: DemodMode[] = [];
 export const ModeSelector = () => {
   const mode = useRadioStore((s) => s.mode);
   const setMode = useRadioStore((s) => s.setMode);
+  const classification = useRadioStore((s) => s.classification);
+
+  const classForMode = (m: DemodMode): string => {
+    const classes = ["mode-btn"];
+    if (mode === m) classes.push("mode-btn-active");
+    if (classification?.confirmed === m) classes.push("mode-btn-confirmed");
+    else if (classification?.candidates.includes(m)) classes.push("mode-btn-suggested");
+    return classes.join(" ");
+  };
 
   return (
     <div className="mode-selector" role="radiogroup" aria-label="Demodulator mode">
@@ -17,7 +26,7 @@ export const ModeSelector = () => {
             type="button"
             role="radio"
             aria-checked={mode === m}
-            className={mode === m ? "mode-btn mode-btn-active" : "mode-btn"}
+            className={classForMode(m)}
             onClick={() => setMode(m)}
           >
             {m}

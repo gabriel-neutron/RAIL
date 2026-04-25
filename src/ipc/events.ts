@@ -13,6 +13,7 @@ import {
   EVENT_SCAN_COMPLETE,
   EVENT_SCAN_STEP,
   EVENT_SCAN_STOPPED,
+  EVENT_SIGNAL_CLASSIFICATION,
   EVENT_SIGNAL_LEVEL,
 } from "./generated/eventNames";
 
@@ -22,6 +23,7 @@ export {
   EVENT_SCAN_COMPLETE,
   EVENT_SCAN_STEP,
   EVENT_SCAN_STOPPED,
+  EVENT_SIGNAL_CLASSIFICATION,
   EVENT_SIGNAL_LEVEL,
 };
 
@@ -90,5 +92,25 @@ export const subscribeScanStopped = (
   handler: (payload: ScanStoppedPayload) => void,
 ): Promise<UnlistenFn> =>
   listen<ScanStoppedPayload>(EVENT_SCAN_STOPPED, (evt) =>
+    handler(evt.payload),
+  );
+
+/// Signal classification result per `docs/SIGNALS.md §5.4`.
+/// Emitted at ~2 Hz by the DSP task.
+///
+/// - `confirmed`: wire-name of the spectrally confirmed mode, or null when
+///   SNR is too low. → green ModeSelector button.
+/// - `candidates`: wire-names from the frequency prior; always populated for
+///   known bands regardless of signal strength. → yellow buttons.
+export type SignalClassificationPayload = {
+  confirmed: string | null;
+  candidates: string[];
+  reason: string;
+};
+
+export const subscribeSignalClassification = (
+  handler: (payload: SignalClassificationPayload) => void,
+): Promise<UnlistenFn> =>
+  listen<SignalClassificationPayload>(EVENT_SIGNAL_CLASSIFICATION, (evt) =>
     handler(evt.payload),
   );

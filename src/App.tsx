@@ -9,6 +9,7 @@ import {
 import {
   subscribeDeviceStatus,
   subscribeReplayPosition,
+  subscribeSignalClassification,
   subscribeSignalLevel,
 } from "./ipc/events";
 import AudioControls from "./components/AudioControls";
@@ -196,8 +197,30 @@ function App() {
   useEffect(() => {
     if (!streamEnabled) {
       useRadioStore.getState().setSignalLevel(null);
+      useRadioStore.getState().setClassification(null);
     }
   }, [streamEnabled]);
+
+  // Signal classification feeds the ModeSelector button colors.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+
+    void subscribeSignalClassification((payload) => {
+      useRadioStore.getState().setClassification(payload);
+    }).then((fn) => {
+      if (cancelled) {
+        fn();
+      } else {
+        unlisten = fn;
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   // Replay transport position from the reader thread.
   useEffect(() => {

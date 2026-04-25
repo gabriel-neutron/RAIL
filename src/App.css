@@ -536,6 +536,18 @@ html,
   cursor: not-allowed;
 }
 
+/* Spectral analysis confirmed this mode (green) */
+.mode-btn-confirmed,
+.mode-btn-confirmed:hover {
+  color: #4caf84;
+}
+
+/* Frequency prior suggests this mode (amber) — can overlap with confirmed */
+.mode-btn-suggested,
+.mode-btn-suggested:hover {
+  color: #c8973a;
+}
+
 /* -------- FilterControl -------- */
 
 .filter-control {

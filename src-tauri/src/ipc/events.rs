@@ -111,6 +111,29 @@ impl ScanStopped {
     }
 }
 
+/// Payload for the `signal-classification` JSON event.
+///
+/// Emitted at ~2 Hz by the DSP task. See `docs/SIGNALS.md §5.4`.
+///
+/// - `confirmed`: wire-name of the spectrally confirmed mode (`"FM"` /
+///   `"NFM"` / `"AM"` / `"USB"` / `"LSB"` / `"CW"`), or `null` when SNR is
+///   too low. Maps to a green ModeSelector button.
+/// - `candidates`: wire-names from the frequency prior; always populated for
+///   known bands regardless of signal strength. Map to yellow buttons.
+#[derive(Debug, Clone, Serialize)]
+pub struct SignalClassification {
+    pub confirmed: Option<&'static str>,
+    pub candidates: Vec<&'static str>,
+    pub reason: String,
+}
+
+impl SignalClassification {
+    pub fn emit<R: Runtime>(&self, app: &AppHandle<R>) -> Result<(), RailError> {
+        app.emit(EVENT_SIGNAL_CLASSIFICATION, self)
+            .map_err(|e| RailError::StreamError(format!("emit signal-classification: {e}")))
+    }
+}
+
 /// Payload for the `replay-position` JSON event. Emitted at ~25 Hz
 /// by the replay reader so the transport slider stays in sync with
 /// the IQ file read head (see [`crate::replay`]).

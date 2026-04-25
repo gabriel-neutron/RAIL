@@ -91,6 +91,9 @@ pub(crate) struct Session {
     /// scanner task so it can poll power during each dwell window.
     /// Initialised to `f32::NEG_INFINITY.to_bits()`.
     pub(crate) latest_dbfs_bits: Arc<AtomicU32>,
+    /// Current centre frequency in Hz. Updated by [`retune`] so the
+    /// classifier in the DSP task always uses the live-tuned frequency.
+    pub(crate) center_hz_bits: Arc<AtomicU32>,
 }
 
 /// Source-specific state for a [`Session`].
@@ -297,6 +300,7 @@ pub async fn start_stream<R: Runtime>(
     let canceler = stream.canceler();
 
     let latest_dbfs_bits = Arc::new(AtomicU32::new(f32::NEG_INFINITY.to_bits()));
+    let center_hz_bits = Arc::new(AtomicU32::new(actual_freq));
 
     let dsp_handle = spawn_dsp_task(
         app.clone(),
@@ -308,6 +312,7 @@ pub async fn start_stream<R: Runtime>(
         Some(canceler),
         sample_rate,
         latest_dbfs_bits.clone(),
+        center_hz_bits.clone(),
     );
 
     let mut guard = state.session.lock().map_err(session_poisoned)?;
@@ -326,6 +331,7 @@ pub async fn start_stream<R: Runtime>(
             gains: gains.clone(),
         }),
         latest_dbfs_bits,
+        center_hz_bits,
     });
     drop(guard);
 
@@ -490,6 +496,7 @@ pub fn retune(args: RetuneArgs, state: State<'_, AppState>) -> Result<RetuneRepl
     tuner.set_center_freq(args.frequency_hz.saturating_sub(offset))?;
     let freq = tuner.center_freq().saturating_add(offset);
     session.frequency_hz = freq;
+    session.center_hz_bits.store(freq, Ordering::Relaxed);
     Ok(RetuneReply { frequency_hz: freq })
 }
 

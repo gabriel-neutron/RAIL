@@ -17,13 +17,14 @@ use tokio::sync::mpsc;
 
 use crate::capture::sigmf::SigMfStreamWriter;
 use crate::capture::wav::WavStreamWriter;
+use crate::dsp::classifier;
 use crate::dsp::demod::{DemodChain, DemodControl};
 use crate::dsp::input::DspInput;
 use crate::dsp::waterfall::{apply_fs4_shift, iq_u8_to_complex, FrameBuilder};
 use crate::error::RailError;
 use crate::hardware::stream::{IqCanceler, DEFAULT_USB_BUF_LEN};
 use crate::ipc::capture_cmd::{AudioStopInfo, CaptureControl, IqStopInfo};
-use crate::ipc::events::SignalLevel;
+use crate::ipc::events::{SignalClassification, SignalLevel};
 use crate::perf_emit::{
     record_audio_emit_interval, record_signal_level_emit_interval, record_waterfall_emit_interval,
 };
@@ -49,6 +50,11 @@ const PEAK_DECAY_DB_PER_EMIT: f32 = 1.0;
 /// The resampler output is variable, so this is a *minimum* drain size.
 pub(crate) const AUDIO_CHUNK_SAMPLES: usize = 1764;
 
+/// Minimum interval between `signal-classification` JSON events (~2 Hz).
+/// Classification is heavier than signal-level; badge updates need no
+/// sub-second cadence.
+const MIN_CLASSIFY_INTERVAL: Duration = Duration::from_millis(500);
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_dsp_task<R: Runtime>(
     app: AppHandle<R>,
@@ -60,9 +66,10 @@ pub(crate) fn spawn_dsp_task<R: Runtime>(
     canceler: Option<IqCanceler>,
     sample_rate_hz: u32,
     latest_dbfs_bits: Arc<AtomicU32>,
+    center_hz_bits: Arc<AtomicU32>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::task::spawn_blocking(move || {
-        let mut ctx = DspTaskCtx::<R>::new(app, sample_rate_hz, latest_dbfs_bits);
+        let mut ctx = DspTaskCtx::<R>::new(app, sample_rate_hz, latest_dbfs_bits, center_hz_bits);
         ctx.run(
             iq_rx,
             waterfall_channel,
@@ -107,6 +114,15 @@ struct DspTaskCtx<R: Runtime> {
     /// that FM/AM discriminators introduce on thermal noise.
     /// See `crate::scanner` and `docs/TIMELINE.md` Phase 9.
     latest_dbfs_bits: Arc<AtomicU32>,
+    /// Current centre frequency in Hz (plain u32, not float bits).
+    /// Updated atomically by [`retune`] so the classifier always uses
+    /// the live-tuned frequency. See `docs/TIMELINE.md` Phase 10.
+    center_hz_bits: Arc<AtomicU32>,
+    /// Timestamp of the last `signal-classification` event emit.
+    last_classify_emit: Instant,
+    /// Last FFT spectrum snapshot retained for classification.
+    /// Populated in `emit_waterfall_frames`; consumed in `emit_classification`.
+    last_spectrum: Vec<f32>,
 }
 
 /// Move exactly `n` items from `pending` into `scratch`, reusing
@@ -123,7 +139,12 @@ fn take_frame<T: Copy>(pending: &mut Vec<T>, scratch: &mut Vec<T>, n: usize) {
 }
 
 impl<R: Runtime> DspTaskCtx<R> {
-    fn new(app: AppHandle<R>, sample_rate_hz: u32, latest_dbfs_bits: Arc<AtomicU32>) -> Self {
+    fn new(
+        app: AppHandle<R>,
+        sample_rate_hz: u32,
+        latest_dbfs_bits: Arc<AtomicU32>,
+        center_hz_bits: Arc<AtomicU32>,
+    ) -> Self {
         Self {
             app,
             builder: FrameBuilder::new(FFT_SIZE),
@@ -141,6 +162,9 @@ impl<R: Runtime> DspTaskCtx<R> {
             audio_writer: None,
             iq_writer: None,
             latest_dbfs_bits,
+            center_hz_bits,
+            last_classify_emit: Instant::now() - MIN_CLASSIFY_INTERVAL,
+            last_spectrum: Vec::with_capacity(FFT_SIZE),
         }
     }
 
@@ -234,6 +258,7 @@ impl<R: Runtime> DspTaskCtx<R> {
             }
 
             self.emit_signal_level(rms_dbfs);
+            self.emit_classification();
         }
 
         log::debug!("dsp task exiting: iq sender dropped");
@@ -349,6 +374,37 @@ impl<R: Runtime> DspTaskCtx<R> {
         self.last_level_emit = Instant::now();
     }
 
+    /// Classify the current signal and emit a `signal-classification` event.
+    ///
+    /// Rate-limited to `MIN_CLASSIFY_INTERVAL` (~2 Hz). Skips silently when
+    /// no spectrum snapshot is available yet. Output contract per
+    /// `docs/SIGNALS.md §5.4`.
+    fn emit_classification(&mut self) {
+        if self.last_classify_emit.elapsed() < MIN_CLASSIFY_INTERVAL {
+            return;
+        }
+        if self.last_spectrum.is_empty() {
+            return;
+        }
+        let center_hz = u64::from(self.center_hz_bits.load(Ordering::Relaxed));
+        let result = classifier::classify(
+            &self.last_spectrum,
+            &self.shifted,
+            self.sample_rate_hz,
+            center_hz,
+        );
+        // Always emit so the frontend can clear green/show yellow priors.
+        let event = SignalClassification {
+            confirmed: result.confirmed,
+            candidates: result.candidates,
+            reason: result.reason,
+        };
+        if let Err(e) = event.emit(&self.app) {
+            log::warn!("signal-classification emit failed: {e}");
+        }
+        self.last_classify_emit = Instant::now();
+    }
+
     /// One-shot FFT + waterfall emit for a prefill window. Skips the
     /// rate limiter (`MIN_EMIT_INTERVAL`) that `emit_waterfall_frames`
     /// uses, and does not touch `fft_pending` / `last_emit` so a
@@ -403,6 +459,11 @@ impl<R: Runtime> DspTaskCtx<R> {
 
             match self.builder.process_shifted(&self.frame_buf) {
                 Ok(spectrum) => {
+                    // Snapshot for the classifier (runs at a lower rate than
+                    // waterfall emit — see `emit_classification`).
+                    self.last_spectrum.clear();
+                    self.last_spectrum.extend_from_slice(spectrum);
+
                     let bytes: &[u8] = cast_slice(spectrum);
                     // `Vec<u8>` allocation here is forced by Tauri's
                     // `InvokeResponseBody::Raw(Vec<u8>)` API — leave as-is

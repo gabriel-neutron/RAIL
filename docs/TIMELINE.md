@@ -100,7 +100,7 @@ clicking a peak tunes the receiver and the waterfall updates.
 
 ---
 
-## Phase 10 — Signal intelligence layer
+## Phase 10 — Signal intelligence layer ✓
 
 > **Prerequisite**: read `docs/SIGNALS.md` §4 (receivable signal reference by band)
 > and §5 (classification heuristics) in full before writing any detection or
@@ -109,19 +109,19 @@ clicking a peak tunes the receiver and the waterfall updates.
 **Goal**: the app detects, measures, and classifies signals automatically —
 emitting a structured suggestion the UI can display without the user selecting a mode.
 
-- [ ] Peak detector in Rust: find local maxima in FFT magnitude above estimated noise floor
+- [x] Peak detector in Rust: find local maxima in FFT magnitude above estimated noise floor
       — see DSP.md §2 for magnitude pipeline
-- [ ] Bandwidth estimator: measure –3 dB and –10 dB width around each detected peak
-- [ ] Envelope variance measurement: discriminate AM from FM family
+- [x] Bandwidth estimator: measure –3 dB width around each detected peak
+- [x] Envelope variance measurement: discriminate AM from FM family
       — see SIGNALS.md §5.2 and DSP.md §4–5 for signal math
-- [ ] Spectral flatness measurement: discriminate analog from digital signals
+- [x] Spectral flatness measurement: discriminate analog from digital signals
       — see SIGNALS.md §5.2
-- [ ] Frequency prior lookup: match current center frequency against band table
+- [x] Frequency prior lookup: match current center frequency against band table
       in SIGNALS.md §5.3
-- [ ] Combine heuristic result + frequency prior into confidence-scored label
-- [ ] Output contract: emit `{label, confidence, reason}` per SIGNALS.md §5.4
+- [x] Combine heuristic result + frequency prior into confidence-scored label
+- [x] Output contract: emit `{label, confidence, reason}` per SIGNALS.md §5.4
       as a low-rate JSON Tauri event (not binary)
-- [ ] Frontend: "Suggested mode" badge near mode selector
+- [x] Frontend: "Suggested mode" badge near mode selector
       — shows label and confidence, tooltip shows `reason`
       — badge is display only; does not change the active mode automatically
 

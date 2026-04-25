@@ -335,102 +335,116 @@ antenna. The R820T2 is at the edge of its range here. Not actionable for RAIL.
 
 ## 5. Classification heuristics reference
 
-> **This section is the specification for Phase 10 implementation.**
 > All classifier logic in Rust must cite this section, not re-explain the rules.
 > See also DSP.md §2 (FFT/magnitude) and DSP.md §4 (demodulation) for DSP primitives.
 
-The classifier operates in two stages: **bandwidth measurement** then
-**modulation discrimination**, with a **frequency prior** applied afterward
-to produce a final label + confidence.
+The classifier uses a **three-path dispatch** based on how many frequency-prior
+candidates are available for the tuned frequency. The frequency prior is the
+primary source of truth; spectral analysis only runs when the prior is ambiguous
+or absent. This design avoids false cycling on single-band frequencies (FM broadcast,
+aviation, maritime).
 
 ---
 
 ### 5.1 Bandwidth measurement
 
-Measure the –3 dB and –10 dB occupied bandwidth around each detected peak.
-See DSP.md §2 for the FFT/magnitude pipeline that feeds this.
+Occupied bandwidth is measured by walking outward from the peak bin until power
+drops below `noise_floor + 6 dB` (not −3 dB from the peak, which is falsely
+narrow for WBFM where the carrier is much stronger than its sidebands).
+Noise floor is estimated as the **median** of all non-DC bins; this is a robust
+estimator that tracks the true noise level regardless of spectral occupancy.
 
-| Measured –3 dB BW | Initial family |
+| Occupied BW | `BwFamily` |
 |---|---|
-| > 150 kHz | Wideband analog or digital wideband |
-| 25–150 kHz | Narrowband analog or digital narrowband |
-| 3–25 kHz | Voice-class (AM, NBFM, SSB) |
-| < 3 kHz | SSB, CW, or very narrow digital |
+| > 150 kHz | `Wideband` |
+| 25–150 kHz | `Narrowband` |
+| 3–25 kHz | `Voice` |
+| < 3 kHz | `Narrow` |
+
+Minimum SNR thresholds:
+- `MIN_PEAK_SNR_DB = 10 dB`: minimum to detect a signal at all.
+- `MIN_CONFIRM_SNR_DB = 20 dB`: minimum to populate `confirmed`. Below this,
+  candidates are still returned but `confirmed` is `null`.
 
 ---
 
 ### 5.2 Modulation discrimination
 
-After bandwidth bucketing, apply the following measurements:
+Only computed for the multi-candidate path (§5.3) — not on every emission.
 
-**AM vs FM discrimination**
-- Compute envelope variance of the demodulated signal (see DSP.md §5 for AM envelope).
-- FM signals: envelope is nearly constant (carrier power stays flat) → low envelope variance.
-- AM signals: envelope tracks the information → high envelope variance.
-- Threshold: if `envelope_variance > 0.15` (normalized) → AM family, else FM family.
+**AM vs FM (envelope variance)**
+- FM signals: envelope nearly constant → low variance.
+- AM signals: envelope tracks modulation → high variance.
+- Threshold: `envelope_variance > 0.15` (normalized) → AM family.
 
-**Analog vs digital discrimination**
-- Compute the spectral flatness of the signal within its occupied bandwidth.
-- Analog voice/music: uneven spectrum, peaks at voice frequencies → flatness < 0.5.
-- Digital signals: near-flat spectrum within their bandwidth → flatness > 0.6.
-- Spectral flatness = geometric mean / arithmetic mean of spectral bins.
-
-**Wideband FM sub-class**
-- If FM family and –3 dB BW > 150 kHz → `WBFM`.
-- If FM family and –3 dB BW 5–25 kHz → `NBFM`.
-- If FM family and BW < 5 kHz → likely CW or very narrow FM.
-
-**Sideband detection (USB/LSB)**
-- SSB signals are asymmetric around center: one sideband present, other absent.
-- Compute power ratio: upper half vs lower half of occupied bandwidth.
-- If ratio > 10 dB → asymmetric → `USB` or `LSB` (sign determines which).
-
-**OOK burst detection**
-- Short duty-cycle bursts (on < 10% of time) with flat spectrum → `OOK`.
-- Measure: fraction of frames where peak power > threshold vs total frames.
+**Sideband asymmetry (USB / LSB)**
+- SSB: one sideband present, other absent. Power ratio upper vs lower half.
+- Threshold raised to **15 dB** (vs a naïve 10 dB) to account for measurement
+  noise in short 4 ms IQ windows. RTL-SDR cannot reliably distinguish SSB from
+  NFM below this threshold.
 
 ---
 
-### 5.3 Frequency prior (band-based lookup)
+### 5.3 Frequency prior and three-path dispatch
 
-Applied after modulation heuristic to adjust confidence or resolve ambiguity.
+The frequency prior provides mode wire-name candidates for known bands.
+These are always returned in `candidates` regardless of signal strength.
 
-| Frequency range | Most likely label | Confidence boost |
+| Frequency | Candidates |
+|---|---|
+| 87.5–108 MHz | `FM` |
+| 108–137 MHz | `AM` (VOR/ILS + aviation voice) |
+| 137.100 / 137.620 MHz ± 5 kHz | `NFM` (NOAA-APT) |
+| 144.800 MHz ± 10 kHz | `NFM` (APRS) |
+| 144–146 MHz | `NFM`, `USB`, `CW` (2m amateur) |
+| 156–174 MHz | `NFM` (maritime VHF) |
+| 161.975 / 162.025 MHz ± 5 kHz | `NFM` (AIS) |
+| 430–440 MHz | `NFM`, `USB` (70cm amateur) |
+| 433.920 MHz ± 200 kHz | `AM`, `NFM` (ISM 433) |
+| 446 MHz ± 100 kHz | `NFM` (PMR446) |
+| 1090 MHz ± 500 kHz | _(none — ADS-B, no audio mode)_ |
+
+**Three-path dispatch** (applied when SNR ≥ `MIN_CONFIRM_SNR_DB`):
+
+| Candidates | Path | `confirmed` source |
 |---|---|---|
-| 87.5–108 MHz | `WBFM` | +high if BW > 150 kHz |
-| 108–118 MHz | `AM` | +medium (VOR/ILS) |
-| 118–137 MHz | `AM` | +high (aviation voice) |
-| 137.100 MHz ± 5 kHz | `NOAA-APT` | +high |
-| 137.620 MHz ± 5 kHz | `NOAA-APT` | +high |
-| 144–146 MHz | `NBFM` or `USB` | +medium |
-| 144.800 MHz ± 10 kHz | `APRS` | +high if digital |
-| 156–174 MHz | `NBFM` | +high (maritime) |
-| 161.975 MHz ± 5 kHz | `AIS` | +high if digital |
-| 162.025 MHz ± 5 kHz | `AIS` | +high if digital |
-| 433.920 MHz ± 200 kHz | `OOK` | +high if burst |
-| 446 MHz ± 100 kHz | `NBFM` | +high (PMR446) |
-| 1090 MHz ± 500 kHz | `ADS-B` | +high if OOK burst |
+| 0 (unknown band) | `broad_classify()` | `BwFamily` + `is_am_family`; never emits SSB/CW without prior |
+| 1 (e.g. FM broadcast, aviation, maritime) | Trust prior directly | `candidates[0]`; no spectral analysis at all |
+| ≥ 2 (e.g. 2m amateur) | `pick_from_candidates()` | First-match: FM→AM→USB→LSB→CW→NFM within candidate set |
+
+The single-prior path eliminates false cycling on bands with a single
+definitive mode — no amount of IQ content will change the result.
 
 ---
 
 ### 5.4 Classifier output contract
 
-The Rust DSP task must emit a structured suggestion on each analysis cycle.
-IPC: JSON Tauri event (not binary — one event per analysis cycle, low rate).
+The Rust DSP task emits a `signal-classification` JSON Tauri event at ~2 Hz.
+IPC payload:
 
 ```json
 {
-  "label": "WBFM",
-  "confidence": "high",
-  "reason": "BW=196kHz, FM envelope, frequency prior 87.5–108MHz"
+  "confirmed": "FM",
+  "candidates": ["FM"],
+  "reason": "BW=196kHz, var=0.012, asym=0.2dB, SNR=42.1dB @ 98.000MHz"
 }
 ```
 
-`confidence` values: `"high"` | `"medium"` | `"low"` | `"none"`.
-`reason` is a human-readable string for display in the UI tooltip.
+- `confirmed`: wire-name of the spectrally confirmed mode, or `null` when SNR
+  is too low or the signal type has no selectable mode.
+  Maps to a **green** ModeSelector button.
+- `candidates`: wire-names from the frequency prior; always populated for known
+  bands regardless of signal strength. Map to **yellow** buttons.
+- `reason`: human-readable diagnostic string; shown as a tooltip.
 
-**Rule**: when `confidence == "none"`, emit `label: "unknown"` and do not
-auto-apply any mode suggestion. The UI badge must not show anything in this case.
+**Rule**: when `confirmed == null`, do not apply any auto-mode suggestion.
+The green button must not light up.
+
+> **TODO**: The classifier heuristics need real-world validation across a wider
+> range of bands, hardware dongles, and propagation conditions. The asymmetry
+> threshold (15 dB) and envelope variance threshold (0.15) were set analytically
+> from synthetic IQ; they may require tuning based on field measurements.
+> See `src-tauri/src/dsp/classifier.rs` for the implementation.
 
 ---
 

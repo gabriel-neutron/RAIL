@@ -133,6 +133,7 @@ pub async fn start_replay<R: Runtime>(
     // Replay sessions do not support scanning, so we pass a throwaway
     // AtomicU32 that nothing will poll.
     let replay_dbfs_bits = Arc::new(AtomicU32::new(f32::NEG_INFINITY.to_bits()));
+    let replay_center_hz_bits = Arc::new(AtomicU32::new(frequency_hz));
     let dsp_handle = spawn_dsp_task(
         app.clone(),
         iq_rx,
@@ -143,6 +144,7 @@ pub async fn start_replay<R: Runtime>(
         None,
         sample_rate,
         replay_dbfs_bits.clone(),
+        replay_center_hz_bits.clone(),
     );
 
     let reader_handle = spawn_replay_reader(app.clone(), info.clone(), iq_tx, replay_ctl_rx);
@@ -163,6 +165,7 @@ pub async fn start_replay<R: Runtime>(
             info: info.clone(),
         }),
         latest_dbfs_bits: replay_dbfs_bits,
+        center_hz_bits: replay_center_hz_bits,
     });
     drop(guard);
 
