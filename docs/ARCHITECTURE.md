@@ -47,6 +47,7 @@ The app ships with a short sample IQ capture at [`docs/assets/demo_iq.sigmf-data
 ```
 hardware/      mod.rs, stream.rs, ffi.rs
 dsp/           input.rs, fft.rs, waterfall.rs, filter.rs, demod/{mod,fm,am}.rs
+decoders/      mod.rs, adsb.rs, aprs.rs, rds.rs, pocsag.rs  (Phase 17)
 capture/       sigmf.rs, wav.rs, tmp.rs
 replay.rs      SigMF playback reader
 scanner.rs     Wideband sweep engine (sequential retune → dwell → power measure)
@@ -103,6 +104,10 @@ RAIL uses two distinct IPC surfaces: **named JSON events** (low-rate status and 
 | `scan-step` | `{ frequencyHz }` | Per scanner retune (~200–240 ms cadence during a sweep); keeps display components in sync |
 | `scan-complete` | `{}` | Once, when a full sweep finishes without hitting squelch |
 | `scan-stopped` | `{ frequencyHz }` | Once, when the scanner halts early on a detected signal |
+| `adsb-1090-frame` | `{ icao, lat?, lon?, alt_ft?, callsign?, speed_kts?, heading_deg?, raw_hex }` | Per decoded Mode S DF17 frame; rate-limited ≤ 10 fps |
+| `aprs-packet` | `{ from_callsign, to, lat?, lon?, comment, raw_info }` | Per valid AX.25 APRS frame; rate-limited |
+| `rds-group` | `{ pi_code, group_type, ps_name?, radio_text?, programme_type, traffic_programme }` | Per complete RDS group (PS name emitted when all 8 chars assembled) |
+| `pocsag-message` | `{ capcode, function, content, baud_rate }` | Per POCSAG message frame after BCH error correction |
 
 Constants live in [`src-tauri/src/ipc/events.rs`](../src-tauri/src/ipc/events.rs); TS mirrors in [`src/ipc/events.ts`](../src/ipc/events.ts).
 
@@ -131,6 +136,8 @@ Dedicated std::thread (per stream)
 tokio::task::spawn_blocking (per stream)
   └── DSP worker (ipc/commands.rs: DspTaskCtx)
         ├── fs/4 shift + channel filter + demod chain
+        ├── decoder side-chain (decoders/ — Phase 17)
+        │     runs after demod chain; emits typed JSON events
         ├── waterfall emit on waterfallChannel  (≤ 40 ms cadence)
         ├── signal-level emit  (≤ 40 ms cadence, peak decay)
         └── audio emit on audioChannel          (per AUDIO_CHUNK_SAMPLES)
@@ -175,6 +182,22 @@ DspTaskCtx → DemodChain (channel filter → decim → mode → LPF → resampl
 Capture writes to a temp path produced by `capture::tmp::new_tmp_path`, then `finalize_capture` / `finalize_iq_capture` atomically moves the file(s) to the user-chosen destination. On cancel, `discard_capture` deletes the temp files.
 
 Replay reuses the same DSP worker; `open_replay` parses the SigMF meta, `start_replay` spawns the reader, and `replay-position` ticks the transport slider in the UI.
+
+### 5.4 Decoder pipeline (Phase 17)
+
+```
+DspTaskCtx — after chain.process(), runs emit_decoder_frames():
+  ├── AdsB1090Decoder  (center_hz ≈ 1090 MHz)
+  │     IQ magnitude → Mode S CRC-24 → DF17 → "adsb-1090-frame"
+  ├── AprsDecoder      (center_hz ≈ 144.390/144.800 MHz)
+  │     NFM audio → Bell 202 → AX.25 → "aprs-packet"
+  ├── RdsDecoder       (center_hz in 87.5–108 MHz, mode=FM)
+  │     WBFM baseband → 57 kHz BPSK → "rds-group"
+  └── PocsagDecoder    (center_hz in 152–159 / 929–931 MHz)
+        NFM audio → FSK → BCH(31,21) → "pocsag-message"
+```
+
+See `docs/DECODERS.md` for framing details, frequency gating, and error handling.
 
 ---
 

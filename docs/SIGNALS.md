@@ -137,11 +137,11 @@ Entries marked **[RAIL: Phase N]** indicate the planned implementation phase.
 | Signal | Center freq | BW | Modulation | Reception | RAIL |
 |---|---|---|---|---|---|
 | WBFM stereo | 87.5–108 MHz (200 kHz steps) | ~200 kHz | FM (±75 kHz dev) | Excellent | done |
-| RDS/RBDS | 57 kHz subcarrier on FM stations | <5 kHz | BPSK subcarrier | Excellent | not planned |
+| RDS/RBDS | 57 kHz subcarrier on FM stations | <5 kHz | BPSK subcarrier | Excellent | Phase 17 |
 
 **Notes**: Strongest signals in the entire RTL-SDR range. Primary demo band.
-RDS carries station name, song info, and traffic data — decoding it requires a
-57 kHz subcarrier demodulator + BPSK decoder, not planned for V2.
+RDS carries station name, song info, and traffic data — decoded in Phase 17 via
+57 kHz subcarrier extraction + BPSK at 1187.5 Bd (see `docs/DECODERS.md §5`).
 
 ---
 
@@ -176,13 +176,16 @@ Classification hint: AM signal in 118–137 MHz → very likely aviation voice.
 
 | Signal | Center freq | BW | Modulation | Reception | RAIL |
 |---|---|---|---|---|---|
-| NOAA 15 APT | 137.620 MHz | ~40 kHz | FM + 2400 Hz sub | Good (overhead pass) | not planned |
-| NOAA 18 APT | 137.912 MHz | ~40 kHz | FM + 2400 Hz sub | Good (overhead pass) | not planned |
-| NOAA 19 APT | 137.100 MHz | ~40 kHz | FM + 2400 Hz sub | Good (overhead pass) | not planned |
+| NOAA 15 APT | 137.620 MHz | ~40 kHz | FM + 2400 Hz sub | — (decommissioned) | excluded |
+| NOAA 18 APT | 137.912 MHz | ~40 kHz | FM + 2400 Hz sub | — (decommissioned) | excluded |
+| NOAA 19 APT | 137.100 MHz | ~40 kHz | FM + 2400 Hz sub | — (decommissioned) | excluded |
+| Meteor-M LRPT | 137.1 / 137.9 MHz | ~150 kHz | OQPSK + Reed-Solomon | Good (overhead pass) | Phase 18/19 |
 
-**Notes**: Requires a directional (V-dipole) antenna and passes only last ~10 min.
-APT decoding (image reconstruction from audio tones) is complex and not in scope.
-Classification hint: FM signal at exactly 137.100/137.620/137.912 MHz → NOAA-APT.
+**Notes**: NOAA APT service was **decommissioned August 19, 2025** — all three satellites
+ceased APT broadcasts on that date. Do not implement an APT decoder.
+Meteor-M 2-3 (LRPT) is the active replacement; OQPSK + Reed-Solomon decoding is
+Phase 18/19 scope.
+Classification hint: FM signal at exactly 137.100/137.620/137.912 MHz → historically NOAA-APT (now inactive).
 
 ---
 
@@ -192,13 +195,13 @@ Classification hint: FM signal at exactly 137.100/137.620/137.912 MHz → NOAA-A
 |---|---|---|---|---|---|
 | FM voice (repeaters) | 144.300–146.000 MHz (EU) | 12.5–25 kHz | NBFM | Excellent | Phase 8 |
 | SSB voice (DX) | 144.100–144.400 MHz | ~3 kHz | USB | Good | Phase 8 |
-| APRS | 144.800 MHz (EU) / 144.390 MHz (US) | ~16 kHz | AFSK 1200 baud | Excellent | not planned |
+| APRS | 144.800 MHz (EU) / 144.390 MHz (US) | ~16 kHz | AFSK 1200 baud | Excellent | Phase 17 |
 | CW | 144.000–144.150 MHz | < 1 kHz | CW | Good | Phase 8 |
 
 **Notes**: APRS (Automatic Packet Reporting System) broadcasts GPS positions,
-weather, and text messages over AX.25 packet radio. The audio sounds like
-a modem at 1200 baud. Decoding requires an AX.25 demodulator — not in V2 scope,
-but detection (identifying the characteristic AFSK tones) is feasible in Phase 10.
+weather, and text messages over AX.25 packet radio. The audio sounds like a modem
+at 1200 baud. Decoded in Phase 17 via Bell 202 correlator → HDLC → AX.25 → APRS
+info field parse (reuses the existing NFM demodulator). See `docs/DECODERS.md §4`.
 Classification hint: NBFM signal at 144.800 MHz → very likely APRS.
 
 ---
@@ -231,12 +234,14 @@ Classification hint: GMSK signal at 161.975 or 162.025 MHz → very likely AIS.
 
 | Signal | Center freq | BW | Modulation | Reception | RAIL |
 |---|---|---|---|---|---|
-| POCSAG | 153.050 MHz (FR), 148–174 MHz (varies) | ~12.5 kHz | FSK 512/1200/2400 baud | Good | not planned |
-| FLEX | Similar range | ~12.5 kHz | 4-FSK | Good | not planned |
+| POCSAG | 153.050 MHz (FR), 148–174 MHz (varies) | ~12.5 kHz | FSK 512/1200/2400 baud | Good | Phase 17 |
+| FLEX | Similar range, also 929–931 MHz | ~12.5 kHz | 2/4-FSK | Good | Phase 18 |
 
 **Notes**: Pager traffic (including hospital, emergency services) is FSK-modulated.
-Detection is straightforward (regular burst pattern, FSK). Decoding POCSAG requires
-an FSK demodulator + POCSAG framing parser — not in V2 scope.
+POCSAG decoded in Phase 17 via FSK slicer → BCH(31,21) error correction → message
+assembly. See `docs/DECODERS.md §6`. FLEX (Phase 18) adds 4-FSK complexity.
+Note: POCSAG messages may contain sensitive PII — content shown only on explicit
+expand in the Decoder Panel.
 
 ---
 
@@ -307,17 +312,16 @@ Classification hint: chirp pattern in 863–870 MHz → likely LoRa.
 
 | Signal | Center freq | BW | Modulation | Reception | RAIL |
 |---|---|---|---|---|---|
-| Mode S / ADS-B | 1090 MHz (fixed) | ~1 MHz burst | OOK pulse-position (PPM) | Good–Excellent | not planned |
+| Mode S / ADS-B | 1090 MHz (fixed) | ~1 MHz burst | OOK pulse-position (PPM) | Good–Excellent | Phase 17 |
 
 **Notes**: **ADS-B is the most demo-worthy signal in the entire RTL-SDR range.**
 Every commercial aircraft broadcasts its ICAO address, GPS position, altitude,
-speed, and callsign in the open (Mode S squitter). The signal is at exactly
-1090 MHz, uses OOK-PPM at 1 Mbps, and is receivable with a simple whip antenna
-over a ~200 km radius. Decoding requires bit-level OOK demodulation + Mode S
-frame parsing — well-documented (reference: dump1090) but not in V2 scope.
+speed, and callsign in the open (Mode S squitter). Decoded in Phase 17 via magnitude
+threshold OOK detection → Mode S CRC-24 validation → DF17 field parse. See
+`docs/DECODERS.md §3`.
 Classification hint: OOK burst at 1090 MHz → unambiguous ADS-B.
-The R820T2 tuner performs adequately at 1090 MHz but sensitivity is reduced
-compared to 300–900 MHz; a filtered 1090 MHz antenna improves results significantly.
+The R820T2 tuner performs adequately at 1090 MHz; a filtered 1090 MHz whip antenna
+improves range significantly. Requires 2.4 MHz sample rate minimum.
 
 ---
 
@@ -449,24 +453,35 @@ The green button must not light up.
 
 ---
 
-### 5.5 Signals deferred beyond V2
+### 5.5 Signals deferred beyond current phase
 
 The following signals are detectable with RTL-SDR but require protocol-specific
-decoders beyond RAIL's V2 scope. Do not implement decoders for these in Phases 7–11.
-They are listed here so that Phase 10 classification can correctly label them
-without attempting to decode them.
+decoders beyond their current phase scope. They are listed here so that the
+Phase 10+ classifier can correctly label them without attempting to decode them.
 
-| Signal | Why deferred |
-|---|---|
-| ADS-B (full decode) | Requires Mode S bit parser, ICAO database |
-| AIS (full decode) | Requires GMSK demod + NMEA parser |
-| APRS (full decode) | Requires AX.25 demod + APRS parser |
-| DAB+ | Requires OFDM + AAC-LC decoder |
-| LoRa | Requires CSS demodulation, proprietary framing |
-| POCSAG | Requires FSK demod + POCSAG frame parser |
-| RDS | Requires 57 kHz subcarrier demod + BPSK |
-| NOAA APT (image) | Requires 2400 Hz tone sync + image reconstruction |
-| GPS | Below noise floor, requires LNA + patch antenna |
+| Signal | Status | Why deferred |
+|---|---|---|
+| AIS (full decode) | Phase 18 | Requires dual-channel GMSK demod + NMEA parser |
+| ACARS | Phase 18 | AM-MSK demod + many ACARS sub-types |
+| FLEX | Phase 18 | 4-FSK; specification is reverse-engineered (no open standard) |
+| rtl_433 sensors | Phase 18 | 200+ sub-protocols → curate 5–10 for Phase 18 |
+| Meteor-M LRPT | Phase 18/19 | OQPSK + Reed-Solomon FEC + image reconstruction |
+| DAB+ | Not planned | OFDM + AAC-LC decoder; very high complexity |
+| LoRa | Not planned | CSS demodulation; proprietary framing |
+| GPS | Not planned | Below noise floor; requires LNA + patch antenna |
+| NOAA APT | Excluded | Decommissioned August 19, 2025 — do not implement |
+| P25 / DMR / D-STAR | Excluded | AMBE vocoder patent-encumbered — permanently out of scope |
+
+---
+
+### 5.6 Implemented decoders (Phase 17+)
+
+| Protocol | Decode Method | Sample Rate Minimum | Active When | Decoder Panel Collapsed View |
+|---|---|---|---|---|
+| ADS-B | OOK magnitude threshold → Mode S CRC-24 → DF17 parse | 2.4 MHz | `center_hz` within 500 kHz of 1090 MHz | Badge + ICAO + altitude |
+| APRS | NFM audio → Bell 202 correlator → HDLC → AX.25 → APRS info | 256 kHz baseband | `center_hz` within 10 kHz of 144.390 or 144.800 MHz | Badge + callsign + position |
+| RDS | WBFM baseband → 57 kHz BPSK → RDS group assembly | 256 kHz baseband | `center_hz` in 87.5–108 MHz AND mode = FM | Badge + PS name + RadioText |
+| POCSAG | NFM audio → FSK slicer → BCH(31,21) → message assembly | 256 kHz baseband | `center_hz` in 152–159 MHz or 929–931 MHz | Badge + CAPCODE (content on expand only) |
 
 ---
 

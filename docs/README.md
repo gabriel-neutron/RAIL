@@ -19,6 +19,7 @@
 | `PRD.md` | Product requirements, scope, UX goals, acceptance criteria | Active |
 | `TIMELINE.md` | Development phases, milestones, task ordering | Active |
 | `PERF.md` | Runtime profiling: waterfall LUT vs blit, optional Rust `profile` feature, CSS coverage | Active |
+| `DECODERS.md` | Protocol decoder reference: ADS-B, APRS, RDS, POCSAG — architecture, framing, frequency gating | Active |
 
 ---
 
@@ -49,3 +50,5 @@ Every time a file in `/docs/` is created or modified:
 - **"How do I profile waterfall or Rust emit intervals?"** → `PERF.md`
 - **"What FFT size should I use?"** → `DSP.md`
 - **"How do I handle RTL-SDR errors?"** → `HARDWARE.md`
+- **"How does the ADS-B / APRS / RDS / POCSAG decoder work?"** → `DECODERS.md`
+- **"What protocols are planned and why?"** → `TIMELINE.md` Phase 17 + `SIGNALS.md §5.5–5.6`
