@@ -33,14 +33,16 @@ impl FftProcessor {
         let mut planner = FftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(n);
         let scratch_len = fft.get_inplace_scratch_len();
+        let window = hann_window(n);
+        let norm = window.iter().sum::<f32>();
         Self {
             fft,
-            window: hann_window(n),
+            window,
             buffer: vec![Complex::new(0.0, 0.0); n],
             scratch: vec![Complex::new(0.0, 0.0); scratch_len],
             out_db: vec![DB_FLOOR; n],
             n,
-            norm: n as f32,
+            norm,
         }
     }
 
@@ -112,5 +114,24 @@ mod tests {
         let mut data = vec![1.0_f32, 2.0, 3.0, 4.0];
         fft_shift(&mut data);
         assert_eq!(data, vec![3.0, 4.0, 1.0, 2.0]);
+    }
+
+    #[test]
+    fn full_scale_tone_peaks_at_zero_dbfs() {
+        const N: usize = 1024;
+        const BIN: usize = 100;
+        let mut proc = FftProcessor::new(N);
+        let iq: Vec<Complex<f32>> = (0..N)
+            .map(|i| {
+                let phase = 2.0 * std::f32::consts::PI * BIN as f32 * i as f32 / N as f32;
+                Complex::new(phase.cos(), phase.sin())
+            })
+            .collect();
+        let spectrum = proc.process(&iq);
+        let peak_db = spectrum.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        assert!(
+            peak_db.abs() <= 0.5,
+            "full-scale tone should peak at 0 ±0.5 dBFS, got {peak_db:.2} dB"
+        );
     }
 }

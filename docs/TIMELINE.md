@@ -3,9 +3,8 @@
 > Task-ordered, not time-boxed. Each phase must be fully working and committed before starting the next.
 
 ## Table of contents
-1. [Phases 0–11 — Completed](#phases-011--completed-)
-2. [Phase 12 — DSP correctness](#phase-12--dsp-correctness)
-3. [Phase 13 — Documentation and presentation](#phase-13--documentation-and-presentation)
+1. [Phases 0–12 — Completed](#phases-012--completed-)
+2. [Phase 13 — Documentation and presentation](#phase-13--documentation-and-presentation)
 4. [Phase 14 — UX improvements](#phase-14--ux-improvements)
 5. [Phase 15 — Coverage and classifier expansion](#phase-15--coverage-and-classifier-expansion)
 6. [Phase 16 — Advanced DSP](#phase-16--advanced-dsp)
@@ -13,7 +12,7 @@
 
 ---
 
-## Phases 0–11 — Completed ✓
+## Phases 0–12 — Completed ✓
 
 | Phase | Summary |
 |---|---|
@@ -29,26 +28,7 @@
 | 9 | Wideband scanner |
 | 10 | Signal intelligence layer |
 | 11 | Polish and guided navigation |
-
----
-
-## Phase 12 — DSP correctness
-
-This phase is based on `@REVIEW.md`, read it for extra details.
-
-**Goal**: fix the P0 bug that makes every dB reading in the app ~6 dB low.
-
-- [ ] **Fix FFT window coherent gain** — `dsp/fft.rs` line ~74
-      Replace `self.norm = n as f32` with `self.norm = window.iter().sum::<f32>()`
-      *(1 h)*
-- [ ] **Add FFT normalization unit test** — `dsp/fft.rs` `#[cfg(test)]`
-      Full-scale complex tone at known frequency must peak at 0 ±0.5 dBFS
-      *(1 h)*
-- [ ] **Recheck classifier thresholds** — `classifier.rs`
-      Re-run classifier tests after normalization fix; adjust `env_var` / `asym` constants if readings shifted
-      *(30 min)*
-
-**Exit criterion**: `cargo test` passes; 0 dBFS test tone peaks within ±0.5 dB of 0 dBFS in FFT output.
+| 12 | DSP correctness — FFT window coherent gain fix, 0 dBFS normalization test |
 
 ---
 
