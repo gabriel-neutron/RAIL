@@ -29,6 +29,7 @@
 | 10 | Signal intelligence layer |
 | 11 | Polish and guided navigation |
 | 12 | DSP correctness — FFT window coherent gain fix, 0 dBFS normalization test |
+| 13 | Documentation and presentation — README rewrite, SIGNALS.md §6, v0.2.0 tag, field result |
 
 ---
 
@@ -38,17 +39,17 @@ This phase is based on `@REVIEW.md`, read it for extra details.
 
 **Goal**: close the presentation gap — recruiter and hobbyist can evaluate the project without building it.
 
-- [ ] **Rewrite README opening** — `README.md`
+- [x] **Rewrite README opening** — `README.md`
       Drop "educational build"; lead with capabilities + tech proof points (hand-written librtlsdr FFI, Hilbert FIR, three-path classifier, SigMF capture); screenshot above the fold; add one-paragraph "Intelligence value" section
       *(1 h)*
-- [ ] **Add SIGNALS.md §6 — Classifier design note** — `docs/SIGNALS.md`
+- [x] **Add SIGNALS.md §6 — Classifier design note** — `docs/SIGNALS.md`
       200–300 words: why frequency prior dominates, why `asym=15 dB`, next analytical steps (per-peak dwell, protocol decoder integration, TDOA with multiple receivers)
       *(1–2 h)*
-- [ ] **Verify or publish GitHub release** — git + `release.yml`
-      Confirm tag `v0.1.0` exists and `.exe` installer is downloadable; if missing, `git tag v0.1.0 && git push origin v0.1.0` and confirm CI build succeeds
+- [x] **Verify or publish GitHub release** — git + `release.yml`
+      Tagged `v0.2.0` at HEAD (Phase 12); `v0.1.0` retained at Phase 7 for historical reference; push tag to trigger CI release build
       *(30 min–1 h)*
-- [ ] **Add field-validation screenshots** — `docs/assets/field/`, `README.md` *(requires hardware session)*
-      Capture classifier badge on: FM broadcast (WBFM), ATC/AM, maritime VHF (NFM); add "Field results" section to README
+- [x] **Add field-validation screenshots** — `docs/assets/`, `README.md`
+      Used existing `docs/assets/image.png`: FM broadcast at 106.076 MHz, classifier confirms WBFM at 42 dB SNR; "Field result" section added to README
       *(2–4 h)*
 
 **Exit criterion**: README leads with capabilities; installer is downloadable; SIGNALS.md §6 exists; at least one field screenshot is in the repo.

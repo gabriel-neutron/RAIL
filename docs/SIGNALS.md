@@ -6,6 +6,7 @@
 3. [Signal type taxonomy](#3-signal-type-taxonomy)
 4. [Receivable signals by frequency band](#4-receivable-signals-by-frequency-band)
 5. [Classification heuristics reference](#5-classification-heuristics-reference)
+6. [Classifier design note](#6-classifier-design-note)
 
 ---
 
@@ -466,3 +467,64 @@ without attempting to decode them.
 | RDS | Requires 57 kHz subcarrier demod + BPSK |
 | NOAA APT (image) | Requires 2400 Hz tone sync + image reconstruction |
 | GPS | Below noise floor, requires LNA + patch antenna |
+
+---
+
+## 6. Classifier design note
+
+### Why the frequency prior runs first
+
+Most SDR classifiers run spectral analysis on every frame and use frequency as a
+tiebreaker. RAIL inverts this: the frequency prior runs first, and spectral analysis
+only executes when the prior returns more than one candidate.
+
+The reason is false-positive suppression on single-band frequencies. FM broadcast
+(87.5–108 MHz) has exactly one valid mode: WBFM. Running envelope variance and
+sideband asymmetry tests on every emission from that band produces cycling — the
+carrier momentarily looks like AM during a fade, or the stereo pilot makes the
+spectrum look asymmetric. The single-prior path eliminates this entirely: one
+candidate means trust the prior directly, no analysis runs.
+
+Spectral analysis is reserved for the multi-candidate case, where it actually adds
+information. The 2m amateur band (144–146 MHz) carries FM voice, SSB DX, APRS,
+and CW simultaneously; a frequency lookup returns all four candidates. Only then
+do envelope variance and sideband asymmetry tests determine which one is present.
+
+### Why the asymmetry threshold is 15 dB
+
+The SSB asymmetry threshold is set at 15 dB, roughly 50% higher than a naïve
+analytical derivation would suggest. The reason is measurement noise: 4 ms IQ
+windows over an RTL-SDR dongle carry enough phase jitter and I/Q imbalance to
+produce 5–10 dB of apparent sideband asymmetry on what is actually a symmetric
+NFM signal. A 10 dB threshold produces false SSB confirmations on strong NFM
+carriers. 15 dB clears the noise floor while remaining well below the 25–40 dB
+asymmetry of a real SSB transmission.
+
+The envelope variance threshold (0.15, normalized) follows similar reasoning:
+FM carriers show near-zero variance, AM carriers show variance proportional to
+modulation depth. 0.15 sits between the two distributions with margin for
+hardware-induced amplitude noise.
+
+Both thresholds were set analytically from synthetic IQ and validated against
+the FM broadcast and aviation bands. They may require adjustment for hardware
+with higher I/Q imbalance or at the edges of the tuner's range.
+
+### Next analytical steps
+
+The three natural extensions to the current classifier, in priority order:
+
+1. **Per-peak dwell** — the current classifier runs on the full 2 MHz spectrum and
+   measures the dominant signal's bandwidth. Running a second shorter-dwell pass
+   centered on each detected peak would enable multi-signal discrimination within
+   the same view.
+
+2. **Protocol decoder integration** — APRS (144.800 MHz) and AIS (161.975/162.025 MHz)
+   have fixed frequencies and known modulations. A lightweight correlation against
+   the known symbol rate (1200 baud AFSK, 9600 baud GMSK) would upgrade the
+   classification from "this is NFM" to "this is APRS traffic" with no structural
+   changes to the classifier architecture.
+
+3. **TDOA with multiple receivers** — with two RTL-SDR dongles and a shared clock
+   reference, time-difference-of-arrival provides a bearing line for any classified
+   signal. The existing classifier output (frequency, mode, SNR, timestamp) is
+   already the correct input format for a TDOA correlator.
