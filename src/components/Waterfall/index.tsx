@@ -94,6 +94,7 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
 
   const zoom = useRadioStore((s) => s.zoom);
   const sampleRateHz = useRadioStore((s) => s.sampleRateHz);
+  const frequencyHz = useRadioStore((s) => s.frequencyHz);
   /// Bumped by the replay store on open / seek / loop. While replaying
   /// an IQ file we want the waterfall's Y-axis to track file time, not
   /// wall-clock emit order — clearing the canvas on each discontinuity
@@ -161,6 +162,12 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
     rowImageRef.current = null;
     avgFrameRef.current = null;
   }, [session?.fftSize, zoom, waterfallEpoch]);
+
+  // Clear the EMA buffer on retune so old-frequency spectrum does not
+  // bleed into the first frames at the new centre frequency.
+  useEffect(() => {
+    avgFrameRef.current = null;
+  }, [frequencyHz]);
 
   // Register a PNG screenshot source with the capture store so the
   // "save screenshot" menu entry can grab the waterfall without

@@ -75,9 +75,10 @@ mapped to the dB range `[noise_floor, signal_peak]`.
 
 **Frame rate**: target 25–30 fps. At fs=2.048 MHz and N=8192:
 `T = 8192/2048000 ≈ 4ms per FFT`. Every frame between emits is FFT-processed and
-accumulated into a linear-magnitude average; the averaged frame is emitted at ~25 fps.
-This provides ~5 dB SNR improvement over single-frame snapshots (≈ sqrt(10) for 10 frames).
-Do not skip frames — average them.
+accumulated into a **power average** (`10^(dB/10)` per bin, back to `10·log10(avg)`);
+the averaged frame is emitted at ~25 fps. This provides ~5 dB SNR improvement over
+single-frame snapshots (≈ sqrt(10) for 10 frames). The accumulator is flushed on
+every retune so cross-frequency blending cannot occur. Do not skip frames — average them.
 
 ---
 

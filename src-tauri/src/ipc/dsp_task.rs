@@ -106,13 +106,16 @@ struct DspTaskCtx<R: Runtime> {
     audio_frame_buf: Vec<f32>,
     phase_idx: u32,
     last_emit: Instant,
-    /// Linear-magnitude accumulator for FFT frame averaging.
-    /// Accumulates |X[k]| (linear, not dB) across all frames between emits
-    /// so the emitted spectrum is a true time-average, not a single snapshot.
-    /// Reset to zero after each emit. See `docs/DSP.md` §3.
+    /// Power accumulator for FFT frame averaging.
+    /// Accumulates |X[k]|² (linear power, not amplitude or dB) across all
+    /// frames between emits so the emitted spectrum is a true power-average.
+    /// Reset to zero after each emit or on retune. See `docs/DSP.md` §3.
     spectral_accum: Vec<f32>,
     /// Count of frames accumulated into `spectral_accum` since the last emit.
     accum_frames: u32,
+    /// Last centre frequency seen from `center_hz_bits`. When this changes,
+    /// `spectral_accum` is flushed so cross-frequency blending cannot occur.
+    last_center_hz: u32,
     peak_dbfs: f32,
     last_level_emit: Instant,
     sample_rate_hz: u32,
@@ -176,6 +179,7 @@ impl<R: Runtime> DspTaskCtx<R> {
             last_emit: Instant::now() - MIN_EMIT_INTERVAL,
             spectral_accum: vec![0.0_f32; FFT_SIZE],
             accum_frames: 0,
+            last_center_hz: center_hz_bits.load(Ordering::Relaxed),
             peak_dbfs: f32::NEG_INFINITY,
             last_level_emit: Instant::now() - MIN_LEVEL_EMIT_INTERVAL,
             sample_rate_hz,
@@ -468,13 +472,22 @@ impl<R: Runtime> DspTaskCtx<R> {
         channel: &Channel<InvokeResponseBody>,
         canceler: Option<&IqCanceler>,
     ) -> bool {
+        // Flush the accumulator when the tuned centre frequency changes so the
+        // first emitted frame after a retune contains only new-centre samples.
+        let current_center = self.center_hz_bits.load(Ordering::Relaxed);
+        if current_center != self.last_center_hz {
+            self.spectral_accum.fill(0.0);
+            self.accum_frames = 0;
+            self.last_center_hz = current_center;
+        }
+
         self.fft_pending.extend_from_slice(&self.shifted);
 
         while self.fft_pending.len() >= FFT_SIZE {
             take_frame(&mut self.fft_pending, &mut self.frame_buf, FFT_SIZE);
 
-            // FFT every frame and accumulate linear magnitude so the emitted
-            // spectrum is a time-average over all frames in the emit window,
+            // FFT every frame and accumulate linear power so the emitted
+            // spectrum is a power-average over all frames in the emit window,
             // not a single snapshot. This gives ~5 dB SNR improvement over
             // the previous approach of dropping 9 out of 10 frames.
             // Per-bin peak (scanner) is updated from raw per-frame dB values
@@ -494,10 +507,10 @@ impl<R: Runtime> DspTaskCtx<R> {
                         }
                     }
 
-                    // Accumulate linear magnitude (|X[k]|, not power or dB) for
-                    // unbiased amplitude averaging. 10^(db/20) inverts 20·log10.
+                    // Accumulate linear power (|X[k]|², not amplitude) for
+                    // unbiased power averaging. 10^(db/10) inverts 10·log10.
                     for (acc, &db) in self.spectral_accum.iter_mut().zip(spectrum_db) {
-                        *acc += 10_f32.powf(db / 20.0);
+                        *acc += 10_f32.powf(db / 10.0);
                     }
                     self.accum_frames += 1;
                 }
@@ -508,13 +521,13 @@ impl<R: Runtime> DspTaskCtx<R> {
                 continue;
             }
 
-            // Emit averaged spectrum. Convert back to dBFS: 20·log10(avg_mag).
+            // Emit averaged spectrum. Convert back to dBFS: 10·log10(avg_power).
             let count = self.accum_frames as f32;
             self.last_spectrum.clear();
             self.last_spectrum.extend(
                 self.spectral_accum
                     .iter()
-                    .map(|&a| 20.0 * (a / count).log10()),
+                    .map(|&a| 10.0 * (a / count).log10()),
             );
 
             // Reset accumulator for the next window.
