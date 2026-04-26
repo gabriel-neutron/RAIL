@@ -70,7 +70,11 @@ pub struct ClassificationResult {
 
 impl ClassificationResult {
     fn no_signal(candidates: Vec<WireName>) -> Self {
-        Self { confirmed: None, candidates, reason: String::new() }
+        Self {
+            confirmed: None,
+            candidates,
+            reason: String::new(),
+        }
     }
 }
 
@@ -179,8 +183,7 @@ pub fn classify(
             // Single-prior band: trust the prior directly, no spectral analysis.
             1 => Some(candidates[0]),
             // Multi-candidate band: spectral picks within the prior's set.
-            _ => pick_from_candidates(&candidates, bw_family, is_am_family,
-                                      asym_db_opt.unwrap()),
+            _ => pick_from_candidates(&candidates, bw_family, is_am_family, asym_db_opt.unwrap()),
         }
     } else {
         None
@@ -192,7 +195,11 @@ pub fn classify(
         String::new()
     };
 
-    ClassificationResult { confirmed, candidates, reason }
+    ClassificationResult {
+        confirmed,
+        candidates,
+        reason,
+    }
 }
 
 // ── BW family ─────────────────────────────────────────────────────────────────
@@ -251,8 +258,8 @@ fn envelope_variance(iq: &[Complex<f32>]) -> f32 {
     if mean == 0.0 {
         return 0.0;
     }
-    let variance = envelopes.iter().map(|&e| (e - mean).powi(2)).sum::<f32>()
-        / envelopes.len() as f32;
+    let variance =
+        envelopes.iter().map(|&e| (e - mean).powi(2)).sum::<f32>() / envelopes.len() as f32;
     variance / (mean * mean)
 }
 
@@ -267,10 +274,22 @@ fn sideband_asymmetry(spectrum: &[f32], lo: usize, hi: usize, dc_center: usize) 
             return -200.0_f32;
         }
         let linear: f32 = slice.iter().map(|&db| 10.0_f32.powf(db / 10.0)).sum();
-        if linear > 0.0 { 10.0 * linear.log10() } else { -200.0 }
+        if linear > 0.0 {
+            10.0 * linear.log10()
+        } else {
+            -200.0
+        }
     };
-    let lower_power = if lo < lower_end { power_db(&spectrum[lo..lower_end]) } else { -200.0 };
-    let upper_power = if upper_start <= hi { power_db(&spectrum[upper_start..=hi]) } else { -200.0 };
+    let lower_power = if lo < lower_end {
+        power_db(&spectrum[lo..lower_end])
+    } else {
+        -200.0
+    };
+    let upper_power = if upper_start <= hi {
+        power_db(&spectrum[upper_start..=hi])
+    } else {
+        -200.0
+    };
     upper_power - lower_power
 }
 
@@ -290,12 +309,24 @@ fn pick_from_candidates(
 ) -> Option<WireName> {
     let has = |name: WireName| candidates.contains(&name);
 
-    if has("FM") && bw_family == BwFamily::Wideband { return Some("FM"); }
-    if has("AM") && is_am_family                    { return Some("AM"); }
-    if has("USB") && asym_db > 15.0                 { return Some("USB"); }
-    if has("LSB") && asym_db < -15.0               { return Some("LSB"); }
-    if has("CW") && bw_family == BwFamily::Narrow   { return Some("CW"); }
-    if has("NFM")                                   { return Some("NFM"); }
+    if has("FM") && bw_family == BwFamily::Wideband {
+        return Some("FM");
+    }
+    if has("AM") && is_am_family {
+        return Some("AM");
+    }
+    if has("USB") && asym_db > 15.0 {
+        return Some("USB");
+    }
+    if has("LSB") && asym_db < -15.0 {
+        return Some("LSB");
+    }
+    if has("CW") && bw_family == BwFamily::Narrow {
+        return Some("CW");
+    }
+    if has("NFM") {
+        return Some("NFM");
+    }
     candidates.first().copied()
 }
 
@@ -308,10 +339,18 @@ fn pick_from_candidates(
 fn broad_classify(bw_family: BwFamily, is_am_family: bool) -> Option<WireName> {
     match bw_family {
         BwFamily::Wideband => {
-            if !is_am_family { Some("FM") } else { None }
+            if !is_am_family {
+                Some("FM")
+            } else {
+                None
+            }
         }
         BwFamily::Narrowband | BwFamily::Voice => {
-            if is_am_family { Some("AM") } else { Some("NFM") }
+            if is_am_family {
+                Some("AM")
+            } else {
+                Some("NFM")
+            }
         }
         // Narrow signals (<3 kHz) could be CW, a data tone, or noise.
         // Without a frequency prior there is no reliable basis to pick one.
@@ -428,7 +467,13 @@ mod tests {
     use super::*;
     use std::f32::consts::PI;
 
-    fn make_spectrum(n: usize, center_bin: usize, width_bins: usize, peak_db: f32, floor_db: f32) -> Vec<f32> {
+    fn make_spectrum(
+        n: usize,
+        center_bin: usize,
+        width_bins: usize,
+        peak_db: f32,
+        floor_db: f32,
+    ) -> Vec<f32> {
         let mut spec = vec![floor_db; n];
         let lo = center_bin.saturating_sub(width_bins / 2);
         let hi = (center_bin + width_bins / 2 + 1).min(n);
@@ -528,13 +573,19 @@ mod tests {
     #[test]
     fn envelope_variance_fm_below_threshold() {
         let var = envelope_variance(&fm_iq(2000));
-        assert!(var < 0.15, "FM should have low envelope variance, got {var:.4}");
+        assert!(
+            var < 0.15,
+            "FM should have low envelope variance, got {var:.4}"
+        );
     }
 
     #[test]
     fn envelope_variance_am_above_threshold() {
         let var = envelope_variance(&am_iq(2000));
-        assert!(var >= 0.15, "AM should have high envelope variance, got {var:.4}");
+        assert!(
+            var >= 0.15,
+            "AM should have high envelope variance, got {var:.4}"
+        );
     }
 
     #[test]
@@ -598,38 +649,90 @@ mod tests {
 
     #[test]
     fn acars_129mhz_returns_am() {
-        let result = classify(&vec![-100.0_f32; 8192], &fm_iq(8192), 2_048_000, 129_125_000);
-        assert!(result.candidates.contains(&"AM"), "ACARS prior should return AM");
+        let result = classify(
+            &vec![-100.0_f32; 8192],
+            &fm_iq(8192),
+            2_048_000,
+            129_125_000,
+        );
+        assert!(
+            result.candidates.contains(&"AM"),
+            "ACARS prior should return AM"
+        );
     }
 
     #[test]
     fn murs_151mhz_returns_nfm() {
-        let result = classify(&vec![-100.0_f32; 8192], &fm_iq(8192), 2_048_000, 152_000_000);
-        assert_eq!(result.candidates, vec!["NFM"], "MURS prior should return NFM");
+        let result = classify(
+            &vec![-100.0_f32; 8192],
+            &fm_iq(8192),
+            2_048_000,
+            152_000_000,
+        );
+        assert_eq!(
+            result.candidates,
+            vec!["NFM"],
+            "MURS prior should return NFM"
+        );
     }
 
     #[test]
     fn noaa_weather_radio_162mhz_returns_nfm() {
-        let result = classify(&vec![-100.0_f32; 8192], &fm_iq(8192), 2_048_000, 162_475_000);
-        assert_eq!(result.candidates, vec!["NFM"], "NOAA weather prior should return NFM");
+        let result = classify(
+            &vec![-100.0_f32; 8192],
+            &fm_iq(8192),
+            2_048_000,
+            162_475_000,
+        );
+        assert_eq!(
+            result.candidates,
+            vec!["NFM"],
+            "NOAA weather prior should return NFM"
+        );
     }
 
     #[test]
     fn dab3_200mhz_returns_empty_no_audio_mode() {
-        let result = classify(&vec![-100.0_f32; 8192], &fm_iq(8192), 2_048_000, 200_000_000);
-        assert!(result.candidates.is_empty(), "DAB III prior should have no demodulatable candidates");
+        let result = classify(
+            &vec![-100.0_f32; 8192],
+            &fm_iq(8192),
+            2_048_000,
+            200_000_000,
+        );
+        assert!(
+            result.candidates.is_empty(),
+            "DAB III prior should have no demodulatable candidates"
+        );
     }
 
     #[test]
     fn frs_gmrs_462mhz_returns_nfm() {
-        let result = classify(&vec![-100.0_f32; 8192], &fm_iq(8192), 2_048_000, 462_562_500);
-        assert_eq!(result.candidates, vec!["NFM"], "FRS/GMRS prior should return NFM");
+        let result = classify(
+            &vec![-100.0_f32; 8192],
+            &fm_iq(8192),
+            2_048_000,
+            462_562_500,
+        );
+        assert_eq!(
+            result.candidates,
+            vec!["NFM"],
+            "FRS/GMRS prior should return NFM"
+        );
     }
 
     #[test]
     fn public_safety_uhf_460mhz_returns_nfm() {
-        let result = classify(&vec![-100.0_f32; 8192], &fm_iq(8192), 2_048_000, 460_000_000);
-        assert_eq!(result.candidates, vec!["NFM"], "Public safety UHF prior should return NFM");
+        let result = classify(
+            &vec![-100.0_f32; 8192],
+            &fm_iq(8192),
+            2_048_000,
+            460_000_000,
+        );
+        assert_eq!(
+            result.candidates,
+            vec!["NFM"],
+            "Public safety UHF prior should return NFM"
+        );
     }
 
     // Unknown band, narrow peak (<3 kHz) → broad_classify returns None — no guess

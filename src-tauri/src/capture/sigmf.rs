@@ -41,7 +41,10 @@ pub struct SigMfGlobal {
     /// Classifier label at the time of capture, e.g. `"WBFM"`. `None`
     /// when no stream was running or the classifier produced no result.
     /// See `docs/SIGNALS.md` §5.4.
-    #[serde(rename = "rail:signal_type_guess", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "rail:signal_type_guess",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub signal_type_guess: Option<String>,
 }
 

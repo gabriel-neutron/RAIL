@@ -51,4 +51,4 @@ Every time a file in `/docs/` is created or modified:
 - **"What FFT size should I use?"** → `DSP.md`
 - **"How do I handle RTL-SDR errors?"** → `HARDWARE.md`
 - **"How does the ADS-B / APRS / RDS / POCSAG decoder work?"** → `DECODERS.md`
-- **"What protocols are planned and why?"** → `TIMELINE.md` Phase 17 + `SIGNALS.md §5.5–5.6`
+- **"What protocols are planned and why?"** → `TIMELINE.md` Phases 17–22 + `SIGNALS.md §5.5–5.6`

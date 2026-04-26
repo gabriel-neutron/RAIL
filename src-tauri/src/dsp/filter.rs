@@ -215,7 +215,10 @@ impl FirDecimatorComplex {
 ///
 /// See `docs/DSP.md` §6.
 pub fn hilbert_fir_taps(n_taps: usize) -> Vec<f32> {
-    assert!(n_taps >= 3 && n_taps % 2 == 1, "Hilbert FIR needs odd tap count ≥ 3");
+    assert!(
+        n_taps >= 3 && n_taps % 2 == 1,
+        "Hilbert FIR needs odd tap count ≥ 3"
+    );
     let center = (n_taps - 1) / 2;
     let window = hann_window(n_taps);
     let mut taps = vec![0.0_f32; n_taps];
@@ -642,7 +645,13 @@ mod tests {
         let passband_peak = run(700.0);
         let stopband_peak = run(4_000.0);
 
-        assert!(passband_peak > 0.5, "BPF4 passband gain too low: {passband_peak}");
-        assert!(stopband_peak < 0.02, "BPF4 stopband not attenuated: {stopband_peak}");
+        assert!(
+            passband_peak > 0.5,
+            "BPF4 passband gain too low: {passband_peak}"
+        );
+        assert!(
+            stopband_peak < 0.02,
+            "BPF4 stopband not attenuated: {stopband_peak}"
+        );
     }
 }

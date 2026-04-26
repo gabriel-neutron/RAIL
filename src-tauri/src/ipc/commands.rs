@@ -364,11 +364,7 @@ pub async fn stop_stream<R: Runtime>(
 ) -> Result<(), RailError> {
     // Cancel any running scanner before tearing down the session it depends on.
     {
-        let scanner = state
-            .scanner
-            .lock()
-            .ok()
-            .and_then(|mut g| g.take());
+        let scanner = state.scanner.lock().ok().and_then(|mut g| g.take());
         if let Some(h) = scanner {
             h.cancel.store(true, Ordering::Relaxed);
             // Don't await — let it exit on its own; the shared AtomicU32
@@ -637,7 +633,13 @@ pub fn add_bookmark<R: Runtime>(
     args: AddBookmarkArgs,
     store: State<'_, BookmarksStore>,
 ) -> Result<Bookmark, RailError> {
-    store.add(&app, args.name, args.frequency_hz, args.mode, args.bandwidth_hz)
+    store.add(
+        &app,
+        args.name,
+        args.frequency_hz,
+        args.mode,
+        args.bandwidth_hz,
+    )
 }
 
 /// Arguments for [`remove_bookmark`].
@@ -696,9 +698,7 @@ pub async fn start_scan<R: Runtime>(
         ));
     }
     if args.dwell_ms < 50 {
-        return Err(RailError::InvalidParameter(
-            "dwell_ms must be >= 50".into(),
-        ));
+        return Err(RailError::InvalidParameter("dwell_ms must be >= 50".into()));
     }
     if args.start_hz >= args.stop_hz {
         return Err(RailError::InvalidParameter(
@@ -729,21 +729,14 @@ pub async fn start_scan<R: Runtime>(
 
     // Cancel any previous scan.
     {
-        let prev = state
-            .scanner
-            .lock()
-            .map_err(scanner_poisoned)?
-            .take();
+        let prev = state.scanner.lock().map_err(scanner_poisoned)?.take();
         if let Some(h) = prev {
             h.cancel.store(true, Ordering::Relaxed);
         }
     }
 
-    let frequencies_hz = crate::scanner::build_frequency_list(
-        args.start_hz,
-        args.stop_hz,
-        args.step_hz,
-    );
+    let frequencies_hz =
+        crate::scanner::build_frequency_list(args.start_hz, args.stop_hz, args.step_hz);
     let reply = crate::scanner::ScanStartReply {
         frequencies_hz: frequencies_hz.clone(),
     };
@@ -767,11 +760,7 @@ pub async fn start_scan<R: Runtime>(
 /// Cancel an in-progress frequency sweep. Idempotent.
 #[tauri::command]
 pub async fn stop_scan(state: State<'_, AppState>) -> Result<(), RailError> {
-    let handle = state
-        .scanner
-        .lock()
-        .map_err(scanner_poisoned)?
-        .take();
+    let handle = state.scanner.lock().map_err(scanner_poisoned)?.take();
     if let Some(h) = handle {
         h.cancel.store(true, Ordering::Relaxed);
         let _ = h.handle.await;

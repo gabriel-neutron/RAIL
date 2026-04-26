@@ -127,7 +127,9 @@ mod tests {
         let mut usb = SsbDemodulator::new_usb();
         let mut out = Vec::new();
         usb.process(&dc, &mut out);
-        let tail_peak = out[out.len() / 2..].iter().fold(0.0_f32, |a, &x| a.max(x.abs()));
+        let tail_peak = out[out.len() / 2..]
+            .iter()
+            .fold(0.0_f32, |a, &x| a.max(x.abs()));
         assert!(
             tail_peak < 0.1,
             "DC offset should be suppressed in tail, got peak={tail_peak}"
@@ -165,8 +167,14 @@ mod tests {
         usb2.process(&neg, &mut out);
         let peak_cancel = out[warmup..].iter().fold(0.0_f32, |a, &b| a.max(b.abs()));
 
-        assert!(peak_pass > 1.5, "USB should pass positive tone, got {peak_pass}");
-        assert!(peak_cancel < 0.1, "USB should cancel negative tone, got {peak_cancel}");
+        assert!(
+            peak_pass > 1.5,
+            "USB should pass positive tone, got {peak_pass}"
+        );
+        assert!(
+            peak_cancel < 0.1,
+            "USB should cancel negative tone, got {peak_cancel}"
+        );
     }
 
     #[test]
@@ -198,7 +206,13 @@ mod tests {
         lsb2.process(&pos, &mut out);
         let peak_cancel = out[warmup..].iter().fold(0.0_f32, |a, &b| a.max(b.abs()));
 
-        assert!(peak_pass > 1.5, "LSB should pass negative tone, got {peak_pass}");
-        assert!(peak_cancel < 0.1, "LSB should cancel positive tone, got {peak_cancel}");
+        assert!(
+            peak_pass > 1.5,
+            "LSB should pass negative tone, got {peak_pass}"
+        );
+        assert!(
+            peak_cancel < 0.1,
+            "LSB should cancel positive tone, got {peak_cancel}"
+        );
     }
 }

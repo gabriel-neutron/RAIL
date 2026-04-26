@@ -124,7 +124,11 @@ impl DemodChain {
         let (audio_cutoff, max_dev_hz, wbfm) = mode_params(config.mode, config.bandwidth_hz);
         let audio_taps = sinc_lowpass_taps(audio_cutoff, bb_rate, AUDIO_FIR_TAPS);
         // Guard FM discriminator against zero deviation (USB/LSB don't use it).
-        let fm_dev = if max_dev_hz > 0.0 { max_dev_hz } else { 5_000.0 };
+        let fm_dev = if max_dev_hz > 0.0 {
+            max_dev_hz
+        } else {
+            5_000.0
+        };
 
         let decim = build_decim(input_rate_hz, bb_rate, channel_cutoff);
 
@@ -228,9 +232,7 @@ impl DemodChain {
         let gated = self.config.squelch_dbfs.is_finite() && rms_dbfs < self.config.squelch_dbfs;
 
         match self.config.mode {
-            DemodMode::Fm | DemodMode::Nfm => {
-                self.fm.process(&self.baseband, &mut self.raw_audio)
-            }
+            DemodMode::Fm | DemodMode::Nfm => self.fm.process(&self.baseband, &mut self.raw_audio),
             DemodMode::Am => self.am.process(&self.baseband, &mut self.raw_audio),
             DemodMode::Usb | DemodMode::Lsb | DemodMode::Cw => {
                 self.ssb.process(&self.baseband, &mut self.raw_audio)
@@ -277,11 +279,7 @@ impl DemodChain {
 
 /// Build the channel decimation filter for `input_rate_hz → bb_rate`.
 /// Uses a 65-tap windowed-sinc LPF at `channel_cutoff`. See `docs/DSP.md` §4.
-fn build_decim(
-    input_rate_hz: f32,
-    bb_rate: f32,
-    channel_cutoff: f32,
-) -> FirDecimatorComplex {
+fn build_decim(input_rate_hz: f32, bb_rate: f32, channel_cutoff: f32) -> FirDecimatorComplex {
     let factor = (input_rate_hz / bb_rate).round() as usize;
     let taps = sinc_lowpass_taps(channel_cutoff, input_rate_hz, CHANNEL_FIR_TAPS);
     FirDecimatorComplex::new(taps, factor)
@@ -493,7 +491,10 @@ mod tests {
             .iter()
             .skip(audio.len() / 2)
             .fold(0.0_f32, |a, &b| a.max(b.abs()));
-        assert!(peak > 0.05, "USB chain: expected audio from positive tone, got peak={peak}");
+        assert!(
+            peak > 0.05,
+            "USB chain: expected audio from positive tone, got peak={peak}"
+        );
     }
 
     #[test]
@@ -522,7 +523,10 @@ mod tests {
             .iter()
             .skip(audio.len() / 2)
             .fold(0.0_f32, |a, &b| a.max(b.abs()));
-        assert!(peak > 0.05, "LSB chain: expected audio from negative tone, got peak={peak}");
+        assert!(
+            peak > 0.05,
+            "LSB chain: expected audio from negative tone, got peak={peak}"
+        );
     }
 
     #[test]
@@ -552,7 +556,10 @@ mod tests {
             .iter()
             .skip(audio.len() / 2)
             .fold(0.0_f32, |a, &b| a.max(b.abs()));
-        assert!(peak > 0.01, "CW chain: expected audio from 700 Hz tone, got peak={peak}");
+        assert!(
+            peak > 0.01,
+            "CW chain: expected audio from 700 Hz tone, got peak={peak}"
+        );
     }
 
     #[test]
@@ -581,7 +588,10 @@ mod tests {
             .iter()
             .skip(audio.len() / 2)
             .fold(0.0_f32, |a, &b| a.max(b.abs()));
-        assert!(peak < 0.05, "CW chain: out-of-band tone should be silent, got peak={peak}");
+        assert!(
+            peak < 0.05,
+            "CW chain: out-of-band tone should be silent, got peak={peak}"
+        );
     }
 
     #[test]

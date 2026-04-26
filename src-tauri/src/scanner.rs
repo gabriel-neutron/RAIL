@@ -142,7 +142,11 @@ async fn run_scanner<R: Runtime>(
         }
         // Notify the frontend so all display components (FrequencyAxis,
         // FilterBandMarker, FrequencyControl) stay in sync via the radio store.
-        if let Err(e) = (ScanStep { frequency_hz: freq_hz }).emit(&app) {
+        if let Err(e) = (ScanStep {
+            frequency_hz: freq_hz,
+        })
+        .emit(&app)
+        {
             log::warn!("scanner: scan-step emit failed: {e}");
         }
 
@@ -174,7 +178,10 @@ async fn run_scanner<R: Runtime>(
 
         let peak_dbfs = {
             let acc = max_dbfs_per_bin.lock().unwrap_or_else(|e| e.into_inner());
-            acc.iter().copied().filter(|v| v.is_finite()).fold(f32::NEG_INFINITY, f32::max)
+            acc.iter()
+                .copied()
+                .filter(|v| v.is_finite())
+                .fold(f32::NEG_INFINITY, f32::max)
         };
 
         emit_step(&scan_channel, peak_dbfs);
@@ -188,7 +195,11 @@ async fn run_scanner<R: Runtime>(
     }
 
     if let Some(freq_hz) = stopped_at {
-        if let Err(e) = (ScanStopped { frequency_hz: freq_hz }).emit(&app) {
+        if let Err(e) = (ScanStopped {
+            frequency_hz: freq_hz,
+        })
+        .emit(&app)
+        {
             log::warn!("scanner: scan-stopped emit failed: {e}");
         }
     } else {
