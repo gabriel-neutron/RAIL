@@ -6,6 +6,8 @@ import { useRadioStore } from "../../store/radio";
 import { useReplayStore } from "../../store/replay";
 import FilterBandMarker from "../FilterBandMarker";
 import FrequencyAxis from "../FrequencyAxis";
+import BandGuideAxis from "../BandGuideAxis";
+import BandGuideControls from "../BandGuideControls";
 import Spectrum from "../Spectrum";
 import { buildColormapLut } from "./colormap";
 
@@ -371,6 +373,8 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
       <div className="spectrum-wrap">
         <Spectrum ref={spectrumCanvasRef} />
         <FrequencyAxis />
+        <BandGuideControls />
+        <BandGuideAxis />
         <FilterBandMarker />
       </div>
       <canvas

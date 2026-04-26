@@ -3,6 +3,7 @@ import { Channel } from "@tauri-apps/api/core";
 
 import type { Bookmark } from "../../ipc/commands";
 import { startScan } from "../../ipc/commands";
+import { BAND_ENTRIES } from "../../data/bands";
 import { useBookmarksStore } from "../../store/bookmarks";
 import { useCaptureStore } from "../../store/capture";
 import { useRadioStore, type DemodMode } from "../../store/radio";
@@ -13,14 +14,11 @@ type MenuKey = "file" | "view" | "bookmarks" | "capture" | "bands" | "settings";
 
 type Band = { label: string; centerHz: number; scanRangeHz: number };
 
-const BANDS: Band[] = [
-  { label: "FM Broadcast", centerHz: 98_000_000, scanRangeHz: 10_000_000 },
-  { label: "Aviation", centerHz: 121_500_000, scanRangeHz: 10_000_000 },
-  { label: "Maritime VHF", centerHz: 156_800_000, scanRangeHz: 10_000_000 },
-  { label: "2m Amateur", centerHz: 144_200_000, scanRangeHz: 10_000_000 },
-  { label: "ISM 433", centerHz: 433_920_000, scanRangeHz: 10_000_000 },
-  { label: "PMR446", centerHz: 446_000_000, scanRangeHz: 10_000_000 },
-];
+const BANDS: Band[] = BAND_ENTRIES.filter((b) => b.priority <= 2).map((b) => ({
+  label: b.label,
+  centerHz: Math.round((b.minHz + b.maxHz) / 2),
+  scanRangeHz: Math.round((b.maxHz - b.minHz) / 2),
+}));
 
 const BOOKMARK_FILE_VERSION = 1;
 const BOOKMARK_EXPORT_NAME = "rail-bookmarks.json";
