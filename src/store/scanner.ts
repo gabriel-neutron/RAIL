@@ -2,7 +2,8 @@ import { create } from "zustand";
 
 export type ScanResult = {
   frequencyHz: number;
-  peakDbfs: number;
+  signalAvgDb: number;
+  noiseFloorDb: number;
 };
 
 export type ScanConfig = {
@@ -10,7 +11,7 @@ export type ScanConfig = {
   stopHz: number;
   stepHz: number;
   dwellMs: number;
-  thresholdDbfs: number;
+  thresholdSnrDb: number;
 };
 
 const DEFAULT_CONFIG: ScanConfig = {
@@ -18,7 +19,7 @@ const DEFAULT_CONFIG: ScanConfig = {
   stopHz: 108_000_000,
   stepHz: 200_000,
   dwellMs: 200,
-  thresholdDbfs: -70,
+  thresholdSnrDb: 10,
 };
 
 type ScannerState = {

@@ -71,7 +71,6 @@ export const MenuBar = () => {
   const setMode = useRadioStore((s) => s.setMode);
   const setBandwidth = useRadioStore((s) => s.setBandwidth);
   const streaming = useRadioStore((s) => s.streaming);
-  const squelchDbfs = useRadioStore((s) => s.squelchDbfs);
   const autoApplyMode = useRadioStore((s) => s.autoApplyMode);
   const setAutoApplyMode = useRadioStore((s) => s.setAutoApplyMode);
   const classifierEnabled = useRadioStore((s) => s.classifierEnabled);
@@ -216,22 +215,24 @@ export const MenuBar = () => {
       stopHz,
       stepHz: 200_000,
       dwellMs: 200,
-      thresholdDbfs: -70,
+      thresholdSnrDb: 10,
     });
     if (!scannerStore.visible) scannerStore.toggleVisible();
     const channel = new Channel<ArrayBuffer>();
     try {
       const reply = await startScan(
-        { startHz, stopHz, stepHz: 200_000, dwellMs: 200, squelchDbfs },
+        { startHz, stopHz, stepHz: 200_000, dwellMs: 200, squelchSnrDb: null },
         channel,
       );
       useScannerStore.getState().beginScan(reply.frequenciesHz);
       const freqs = reply.frequenciesHz;
       channel.onmessage = (buffer: ArrayBuffer) => {
-        const dbfs = new DataView(buffer).getFloat32(0, true);
+        const view = new DataView(buffer);
+        const signalAvgDb = view.getFloat32(0, true);
+        const noiseFloorDb = view.getFloat32(4, true);
         const idx = useScannerStore.getState().results.length;
         if (idx < freqs.length) {
-          useScannerStore.getState().pushResult({ frequencyHz: freqs[idx], peakDbfs: dbfs });
+          useScannerStore.getState().pushResult({ frequencyHz: freqs[idx], signalAvgDb, noiseFloorDb });
         }
       };
     } catch (err) {

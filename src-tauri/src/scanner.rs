@@ -1,8 +1,10 @@
 //! Wideband scanner — sequential sweep over a configurable frequency range.
 //!
 //! The scanner reuses the live IQ stream: `retune` is called per step while
-//! the DSP worker keeps running. Peak baseband power is polled from the shared
-//! `latest_dbfs_bits` atomic written by the DSP task every buffer cycle.
+//! the DSP worker keeps running. Per-step SNR is computed from
+//! `max_dbfs_per_bin`: average power in a narrowband window centred on the
+//! target frequency minus the median of the full spectrum (noise floor
+//! estimate). See `docs/DSP.md` §2 for bin geometry.
 //!
 //! See `docs/TIMELINE.md` Phase 9 and `docs/ARCHITECTURE.md` §3.
 
@@ -29,10 +31,11 @@ pub struct StartScanArgs {
     pub step_hz: u32,
     /// How long to dwell at each step before measuring (ms, ≥ 50).
     pub dwell_ms: u64,
-    /// Optional squelch gate (dBFS). When a step's peak exceeds this,
-    /// the scan stops and emits `scan-stopped`. `None` disables early-stop.
+    /// Optional early-stop SNR gate (dB). When a step's local SNR exceeds
+    /// this, the scan stops and emits `scan-stopped`. `None` disables
+    /// early-stop and always completes the full sweep.
     #[serde(default)]
-    pub squelch_dbfs: Option<f32>,
+    pub squelch_snr_db: Option<f32>,
 }
 
 /// Reply for [`start_scan`](crate::ipc::commands::start_scan).
@@ -66,6 +69,57 @@ pub(crate) fn build_frequency_list(start_hz: u32, stop_hz: u32, step_hz: u32) ->
     freqs
 }
 
+/// Compute the local SNR for one scan step from the per-bin peak accumulator.
+///
+/// Returns `(signal_avg_db, noise_floor_db)` where:
+/// - `signal_avg_db` is the mean of finite accumulator values in the
+///   narrowband window `[center − half_bins, center + half_bins]` (the
+///   channel centred on the tuned frequency after the `fs/4` shift).
+/// - `noise_floor_db` is the median of all finite accumulator values
+///   (robust to sparse signal peaks — see `docs/DSP.md` §2 for bin geometry).
+///
+/// Both return `f32::NEG_INFINITY` when the accumulator is empty or has
+/// fewer than 16 finite values.
+fn compute_channel_snr(acc: &[f32], sample_rate_hz: u32, step_hz: u32) -> (f32, f32) {
+    let fft_size = acc.len();
+    if fft_size == 0 {
+        return (f32::NEG_INFINITY, f32::NEG_INFINITY);
+    }
+
+    // After fs/4 downconversion the target frequency lands at the centre bin.
+    let center = fft_size / 2;
+    let bin_width = sample_rate_hz as f32 / fft_size as f32;
+    let half_bins = ((step_hz as f32 / 2.0) / bin_width) as usize;
+    let half_bins = half_bins.max(1).min(center.saturating_sub(1));
+    let lo = center.saturating_sub(half_bins);
+    let hi = (center + half_bins).min(fft_size - 1);
+
+    // Signal: average of target-window bins.
+    let mut sig_sum = 0.0_f32;
+    let mut sig_n = 0usize;
+    for &v in &acc[lo..=hi] {
+        if v.is_finite() {
+            sig_sum += v;
+            sig_n += 1;
+        }
+    }
+    let signal_avg_db = if sig_n == 0 {
+        f32::NEG_INFINITY
+    } else {
+        sig_sum / sig_n as f32
+    };
+
+    // Noise: median of all finite bins (robust to sparse peaks).
+    let mut all_finite: Vec<f32> = acc.iter().copied().filter(|v| v.is_finite()).collect();
+    if all_finite.len() < 16 {
+        return (signal_avg_db, f32::NEG_INFINITY);
+    }
+    all_finite.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+    let noise_floor_db = all_finite[all_finite.len() / 2];
+
+    (signal_avg_db, noise_floor_db)
+}
+
 /// Spawn the scanner task and return its [`ScannerHandle`].
 ///
 /// # Arguments
@@ -73,8 +127,10 @@ pub(crate) fn build_frequency_list(start_hz: u32, stop_hz: u32, step_hz: u32) ->
 ///   `set_center_freq` without interrupting the IQ reader thread.
 /// * `lo_offset_hz` — `sample_rate / 4` LO offset (see `docs/DSP.md` §1).
 /// * `max_dbfs_per_bin` — per-bin peak accumulator maintained by the DSP task.
-///   The scanner resets it after settle and reads the peak-of-bins at dwell end,
-///   capturing burst signals that would be missed by a single-poll approach.
+///   The scanner resets it after settle and reads the per-channel average at
+///   dwell end.
+/// * `sample_rate_hz` — SDR sample rate, used to derive FFT bin width.
+/// * `step_hz` — frequency step, used to derive the channel measurement window.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_scanner<R: Runtime>(
     app: AppHandle<R>,
@@ -82,9 +138,11 @@ pub(crate) fn spawn_scanner<R: Runtime>(
     lo_offset_hz: u32,
     frequencies_hz: Vec<u32>,
     dwell_ms: u64,
-    squelch_dbfs: Option<f32>,
+    squelch_snr_db: Option<f32>,
     max_dbfs_per_bin: Arc<Mutex<Vec<f32>>>,
     scan_channel: Channel<InvokeResponseBody>,
+    sample_rate_hz: u32,
+    step_hz: u32,
 ) -> ScannerHandle {
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel_task = cancel.clone();
@@ -95,10 +153,12 @@ pub(crate) fn spawn_scanner<R: Runtime>(
             lo_offset_hz,
             frequencies_hz,
             dwell_ms,
-            squelch_dbfs,
+            squelch_snr_db,
             max_dbfs_per_bin,
             scan_channel,
             cancel_task,
+            sample_rate_hz,
+            step_hz,
         )
         .await;
     });
@@ -121,10 +181,12 @@ async fn run_scanner<R: Runtime>(
     lo_offset_hz: u32,
     frequencies_hz: Vec<u32>,
     dwell_ms: u64,
-    squelch_dbfs: Option<f32>,
+    squelch_snr_db: Option<f32>,
     max_dbfs_per_bin: Arc<Mutex<Vec<f32>>>,
     scan_channel: Channel<InvokeResponseBody>,
     cancel: Arc<AtomicBool>,
+    sample_rate_hz: u32,
+    step_hz: u32,
 ) {
     let dwell = Duration::from_millis(dwell_ms);
     let mut stopped_at: Option<u32> = None;
@@ -137,7 +199,7 @@ async fn run_scanner<R: Runtime>(
         // Retune: park LO at freq − fs/4 (docs/DSP.md §1)
         if let Err(e) = tuner.set_center_freq(freq_hz.saturating_sub(lo_offset_hz)) {
             log::warn!("scanner: retune to {freq_hz} Hz failed: {e}");
-            emit_step(&scan_channel, f32::NEG_INFINITY);
+            emit_step(&scan_channel, f32::NEG_INFINITY, f32::NEG_INFINITY);
             continue;
         }
         // Notify the frontend so all display components (FrequencyAxis,
@@ -164,9 +226,7 @@ async fn run_scanner<R: Runtime>(
         }
 
         // Dwell: the DSP task continuously updates max_dbfs_per_bin; we only
-        // need to sleep and check for cancellation. Peak-of-bins is read once
-        // at the end of the window, capturing bursts that span any fraction of
-        // the dwell interval — including sub-POLL_INTERVAL events.
+        // need to sleep and check for cancellation.
         let mut elapsed = Duration::ZERO;
         while elapsed < dwell {
             if cancel.load(Ordering::Relaxed) {
@@ -176,18 +236,16 @@ async fn run_scanner<R: Runtime>(
             elapsed += POLL_INTERVAL;
         }
 
-        let peak_dbfs = {
+        let (signal_avg_db, noise_floor_db) = {
             let acc = max_dbfs_per_bin.lock().unwrap_or_else(|e| e.into_inner());
-            acc.iter()
-                .copied()
-                .filter(|v| v.is_finite())
-                .fold(f32::NEG_INFINITY, f32::max)
+            compute_channel_snr(&acc, sample_rate_hz, step_hz)
         };
 
-        emit_step(&scan_channel, peak_dbfs);
+        emit_step(&scan_channel, signal_avg_db, noise_floor_db);
 
-        if let Some(threshold) = squelch_dbfs {
-            if peak_dbfs > threshold {
+        if let Some(threshold) = squelch_snr_db {
+            let snr = signal_avg_db - noise_floor_db;
+            if snr.is_finite() && snr > threshold {
                 stopped_at = Some(freq_hz);
                 break;
             }
@@ -202,17 +260,22 @@ async fn run_scanner<R: Runtime>(
         {
             log::warn!("scanner: scan-stopped emit failed: {e}");
         }
-    } else {
-        if let Err(e) = ScanComplete.emit(&app) {
-            log::warn!("scanner: scan-complete emit failed: {e}");
-        }
+    } else if let Err(e) = ScanComplete.emit(&app) {
+        log::warn!("scanner: scan-complete emit failed: {e}");
     }
 }
 
-/// Emit one `f32` (4 bytes, little-endian) on the scan binary channel.
-/// Each call corresponds to one frequency step's peak dBFS.
-fn emit_step(channel: &Channel<InvokeResponseBody>, peak_dbfs: f32) {
-    let bytes: &[u8] = cast_slice(std::slice::from_ref(&peak_dbfs));
+/// Emit one step result (8 bytes, two little-endian f32) on the scan channel.
+/// Byte 0–3: `signal_avg_db` (average power in target channel window).
+/// Byte 4–7: `noise_floor_db` (median of full spectrum — noise reference).
+/// Frontend computes SNR as the difference of the two fields.
+fn emit_step(
+    channel: &Channel<InvokeResponseBody>,
+    signal_avg_db: f32,
+    noise_floor_db: f32,
+) {
+    let payload = [signal_avg_db, noise_floor_db];
+    let bytes: &[u8] = cast_slice(&payload);
     if let Err(e) = channel.send(InvokeResponseBody::Raw(bytes.to_vec())) {
         log::warn!("scanner: channel send failed: {e}");
     }
@@ -220,7 +283,7 @@ fn emit_step(channel: &Channel<InvokeResponseBody>, peak_dbfs: f32) {
 
 #[cfg(test)]
 mod tests {
-    use super::build_frequency_list;
+    use super::{build_frequency_list, compute_channel_snr};
 
     #[test]
     fn frequency_list_inclusive_stop() {
@@ -240,5 +303,53 @@ mod tests {
     fn frequency_list_exact_stop() {
         let freqs = build_frequency_list(100_000_000, 100_400_000, 200_000);
         assert_eq!(freqs, vec![100_000_000, 100_200_000, 100_400_000]);
+    }
+
+    #[test]
+    fn channel_snr_detects_elevated_window() {
+        // 8192 bins all at -50 dBFS; signal window at -20 dBFS.
+        // Expected: signal_avg ≈ -20, noise_floor ≈ -50, SNR ≈ 30.
+        let fs = 2_048_000_u32;
+        let step = 200_000_u32;
+        let n = 8192_usize;
+        let mut acc = vec![-50.0_f32; n];
+
+        // Paint the target window: bins [3696, 4496] at -20 dBFS.
+        let center = n / 2; // 4096
+        let bin_width = fs as f32 / n as f32; // 250 Hz
+        let half = ((step as f32 / 2.0) / bin_width) as usize; // 400
+        for v in &mut acc[(center - half)..=(center + half)] {
+            *v = -20.0;
+        }
+
+        let (sig, noise) = compute_channel_snr(&acc, fs, step);
+        assert!(
+            (sig - (-20.0)).abs() < 0.5,
+            "signal_avg_db should be ~-20, got {sig}"
+        );
+        assert!(
+            (noise - (-50.0)).abs() < 1.0,
+            "noise_floor_db should be ~-50, got {noise}"
+        );
+        assert!(
+            (sig - noise - 30.0).abs() < 1.5,
+            "SNR should be ~30 dB, got {}",
+            sig - noise
+        );
+    }
+
+    #[test]
+    fn channel_snr_all_neg_infinity() {
+        let acc = vec![f32::NEG_INFINITY; 8192];
+        let (sig, noise) = compute_channel_snr(&acc, 2_048_000, 200_000);
+        assert!(!sig.is_finite(), "signal should be NEG_INFINITY");
+        assert!(!noise.is_finite(), "noise should be NEG_INFINITY");
+    }
+
+    #[test]
+    fn channel_snr_empty_accumulator() {
+        let (sig, noise) = compute_channel_snr(&[], 2_048_000, 200_000);
+        assert!(!sig.is_finite());
+        assert!(!noise.is_finite());
     }
 }

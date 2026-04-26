@@ -32,8 +32,8 @@ export const Scanner = () => {
     String(Math.round(scanConfig.stepHz / 1e3)),
   );
   const [dwellMs, setDwellMs] = useState(() => String(scanConfig.dwellMs));
-  const [thresholdDbfs, setThresholdDbfs] = useState(() =>
-    String(scanConfig.thresholdDbfs),
+  const [thresholdSnrDb, setThresholdSnrDb] = useState(() =>
+    String(scanConfig.thresholdSnrDb),
   );
   const [statusText, setStatusText] = useState("Idle");
   const [selectedIdx, setSelectedIdx] = useState(-1);
@@ -46,25 +46,25 @@ export const Scanner = () => {
     setStopMhz((scanConfig.stopHz / 1e6).toFixed(1));
     setStepKhz(String(Math.round(scanConfig.stepHz / 1e3)));
     setDwellMs(String(scanConfig.dwellMs));
-    setThresholdDbfs(String(scanConfig.thresholdDbfs));
+    setThresholdSnrDb(String(scanConfig.thresholdSnrDb));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanConfigSeq]);
 
-  // Ref so event callbacks always see the current threshold.
-  const thresholdRef = useRef(scanConfig.thresholdDbfs);
+  // Ref so event callbacks always see the current threshold (SNR dB).
+  const thresholdRef = useRef(scanConfig.thresholdSnrDb);
   useEffect(() => {
-    const v = parseFloat(thresholdDbfs);
-    thresholdRef.current = Number.isFinite(v) ? v : -70;
-  }, [thresholdDbfs]);
+    const v = parseFloat(thresholdSnrDb);
+    thresholdRef.current = Number.isFinite(v) ? v : 10;
+  }, [thresholdSnrDb]);
 
   const threshold = useMemo(() => {
-    const v = parseFloat(thresholdDbfs);
-    return Number.isFinite(v) ? v : -70;
-  }, [thresholdDbfs]);
+    const v = parseFloat(thresholdSnrDb);
+    return Number.isFinite(v) ? v : 10;
+  }, [thresholdSnrDb]);
 
-  // Signals whose peak is above the threshold — navigation targets.
+  // Signals whose SNR is above the threshold — navigation targets.
   const detectedSignals = useMemo(
-    () => results.filter((r) => r.peakDbfs > threshold),
+    () => results.filter((r) => (r.signalAvgDb - r.noiseFloorDb) > threshold),
     [results, threshold],
   );
 
@@ -100,7 +100,7 @@ export const Scanner = () => {
 
     const autoSelect = () => {
       const { results: r } = useScannerStore.getState();
-      const sigs = r.filter((x) => x.peakDbfs > thresholdRef.current);
+      const sigs = r.filter((x) => (x.signalAvgDb - x.noiseFloorDb) > thresholdRef.current);
       if (sigs.length > 0) {
         setSelectedIdx(0);
         setFrequency(sigs[0].frequencyHz);
@@ -154,20 +154,22 @@ export const Scanner = () => {
     channelRef.current = channel;
 
     channel.onmessage = (buffer: ArrayBuffer) => {
-      const dbfs = new DataView(buffer).getFloat32(0, true);
+      const view = new DataView(buffer);
+      const signalAvgDb = view.getFloat32(0, true);
+      const noiseFloorDb = view.getFloat32(4, true);
       const freqs = freqsRef.current;
       const idx = useScannerStore.getState().results.length;
       if (idx < freqs.length) {
         useScannerStore
           .getState()
-          .pushResult({ frequencyHz: freqs[idx], peakDbfs: dbfs });
+          .pushResult({ frequencyHz: freqs[idx], signalAvgDb, noiseFloorDb });
       }
     };
 
     try {
       setStatusText("Starting…");
       const reply = await startScan(
-        { startHz, stopHz, stepHz, dwellMs: dwell, squelchDbfs: null },
+        { startHz, stopHz, stepHz, dwellMs: dwell, squelchSnrDb: null },
         channel,
       );
       beginScan(reply.frequenciesHz);
@@ -272,17 +274,17 @@ export const Scanner = () => {
         />
         <span className="scanner-unit">ms</span>
 
-        <span className="scanner-label">Squelch</span>
+        <span className="scanner-label">Min SNR</span>
         <input
           type="number"
           className="scanner-input"
-          value={thresholdDbfs}
-          onChange={(e) => setThresholdDbfs(e.target.value)}
-          step="5"
-          max="0"
-          aria-label="Signal detection threshold in dBFS"
+          value={thresholdSnrDb}
+          onChange={(e) => setThresholdSnrDb(e.target.value)}
+          step="1"
+          min="0"
+          aria-label="Minimum SNR threshold in dB"
         />
-        <span className="scanner-unit">dBFS</span>
+        <span className="scanner-unit">dB</span>
       </div>
 
       <div className="scanner-separator" role="separator" />

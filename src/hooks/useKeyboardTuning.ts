@@ -34,27 +34,29 @@ export const useKeyboardTuning = (): void => {
       // Ctrl+Shift+S — quick scan ±10 MHz.
       if (e.key === "S" && e.ctrlKey && e.shiftKey) {
         e.preventDefault();
-        const { frequencyHz, squelchDbfs, streaming, classifierEnabled } = useRadioStore.getState();
+        const { frequencyHz, streaming, classifierEnabled } = useRadioStore.getState();
         if (!streaming || !classifierEnabled) return;
         const RANGE_HZ = 10_000_000;
         const startHz = Math.max(500_000, frequencyHz - RANGE_HZ);
         const stopHz = frequencyHz + RANGE_HZ;
         const stepHz = 200_000;
         const scannerStore = useScannerStore.getState();
-        scannerStore.setScanConfig({ startHz, stopHz, stepHz, dwellMs: 200, thresholdDbfs: -70 });
+        scannerStore.setScanConfig({ startHz, stopHz, stepHz, dwellMs: 200, thresholdSnrDb: 10 });
         if (!scannerStore.visible) scannerStore.toggleVisible();
         const channel = new Channel<ArrayBuffer>();
         void startScan(
-          { startHz, stopHz, stepHz, dwellMs: 200, squelchDbfs },
+          { startHz, stopHz, stepHz, dwellMs: 200, squelchSnrDb: null },
           channel,
         ).then((reply) => {
           useScannerStore.getState().beginScan(reply.frequenciesHz);
           const freqs = reply.frequenciesHz;
           channel.onmessage = (buffer: ArrayBuffer) => {
-            const dbfs = new DataView(buffer).getFloat32(0, true);
+            const view = new DataView(buffer);
+            const signalAvgDb = view.getFloat32(0, true);
+            const noiseFloorDb = view.getFloat32(4, true);
             const idx = useScannerStore.getState().results.length;
             if (idx < freqs.length) {
-              useScannerStore.getState().pushResult({ frequencyHz: freqs[idx], peakDbfs: dbfs });
+              useScannerStore.getState().pushResult({ frequencyHz: freqs[idx], signalAvgDb, noiseFloorDb });
             }
           };
         }).catch((err) => {

@@ -680,10 +680,11 @@ fn scanner_poisoned<T>(_: std::sync::PoisonError<T>) -> RailError {
 /// Start a wideband frequency sweep. Requires an active live stream.
 ///
 /// The scanner tunes through `args.start_hz..=args.stop_hz` in steps of
-/// `args.step_hz`, dwells `args.dwell_ms` at each step, and emits one
-/// `f32` (peak dBFS, 4 bytes) per step on `scan_channel`.
+/// `args.step_hz`, dwells `args.dwell_ms` at each step, and emits 8 bytes
+/// per step on `scan_channel` (two little-endian f32: signal_avg_db and
+/// noise_floor_db). SNR = signal_avg_db − noise_floor_db.
 /// When a full sweep completes, emits the `scan-complete` JSON event.
-/// When a step's peak exceeds `args.squelch_dbfs`, emits `scan-stopped`.
+/// When a step's SNR exceeds `args.squelch_snr_db`, emits `scan-stopped`.
 /// See `docs/TIMELINE.md` Phase 9.
 #[tauri::command]
 pub async fn start_scan<R: Runtime>(
@@ -707,7 +708,7 @@ pub async fn start_scan<R: Runtime>(
     }
 
     // Extract what the scanner task needs from the live session.
-    let (tuner, lo_offset, max_dbfs_per_bin) = {
+    let (tuner, lo_offset, max_dbfs_per_bin, sample_rate_hz) = {
         let guard = state.session.lock().map_err(session_poisoned)?;
         let session = guard
             .as_ref()
@@ -724,7 +725,8 @@ pub async fn start_scan<R: Runtime>(
             .tuner
             .ok_or_else(|| RailError::InvalidParameter("tuner unavailable".into()))?;
         let lo_offset = lo_offset_hz(session.sample_rate_hz);
-        (tuner, lo_offset, session.max_dbfs_per_bin.clone())
+        let sample_rate_hz = session.sample_rate_hz;
+        (tuner, lo_offset, session.max_dbfs_per_bin.clone(), sample_rate_hz)
     };
 
     // Cancel any previous scan.
@@ -747,9 +749,11 @@ pub async fn start_scan<R: Runtime>(
         lo_offset,
         frequencies_hz,
         args.dwell_ms,
-        args.squelch_dbfs,
+        args.squelch_snr_db,
         max_dbfs_per_bin,
         scan_channel,
+        sample_rate_hz,
+        args.step_hz,
     );
 
     *state.scanner.lock().map_err(scanner_poisoned)? = Some(handle);

@@ -238,7 +238,7 @@ export type StartScanArgs = {
   stopHz: number;
   stepHz: number;
   dwellMs: number;
-  squelchDbfs?: number | null;
+  squelchSnrDb?: number | null;
 };
 
 export type ScanStartReply = {
