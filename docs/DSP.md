@@ -74,7 +74,10 @@ Rust must never send RGB. React must never compute FFT or magnitude.
 mapped to the dB range `[noise_floor, signal_peak]`.
 
 **Frame rate**: target 25–30 fps. At fs=2.048 MHz and N=8192:
-`T = 8192/2048000 ≈ 4ms per FFT`. Average or skip frames to hit target fps.
+`T = 8192/2048000 ≈ 4ms per FFT`. Every frame between emits is FFT-processed and
+accumulated into a linear-magnitude average; the averaged frame is emitted at ~25 fps.
+This provides ~5 dB SNR improvement over single-frame snapshots (≈ sqrt(10) for 10 frames).
+Do not skip frames — average them.
 
 ---
 
@@ -102,12 +105,14 @@ Scale by `fs / (2π·max_deviation)` to normalize audio amplitude.
 
 **Max deviation**: WBFM = 75 kHz, NBFM = 2.5–5 kHz.
 
-**De-emphasis filter (WBFM only)**: broadcast FM applies 50µs (Europe) or
-75µs (USA) pre-emphasis. Apply inverse RC filter post-demodulation:
+**De-emphasis filter (WBFM only)**: broadcast FM applies pre-emphasis before
+transmission; demodulators must apply the inverse RC filter:
 ```
 H(z) = (1 - e^(-1/τfs)) / (1 - e^(-1/τfs)·z^(-1))
-where τ = 50×10⁻⁶ (Europe)
 ```
+Time constant τ by region: **75 µs (Americas — default)**, 50 µs (Europe / Japan).
+Using the wrong τ causes audible tonal imbalance (~8 dB error at 10 kHz).
+Change `DEEMPHASIS_TAU_S` in `src-tauri/src/dsp/demod/mod.rs` to match your region.
 
 For all modes: single-stage decimation with a 65-tap windowed-sinc LPF.
 The channel cutoff is set to half the user bandwidth, bounded by 90 % of
@@ -239,13 +244,24 @@ Applied to the time-domain samples before FFT to reduce spectral leakage.
 
 | Window | Sidelobe level | Main lobe width | Use case |
 |---|---|---|---|
-| Rectangular | High (-13 dB) | Narrow | Never — aliasing artifacts |
-| Hann | Medium (-31 dB) | Medium | Default for waterfall |
-| Blackman-Harris | Low (-92 dB) | Wide | Weak signal detection |
+| Rectangular | High (-13 dB) | Narrow | Never — severe leakage artifacts |
+| Hann | Medium (-31 dB) | Medium | FIR filter design (sinc_lowpass_taps) |
+| Blackman-Harris | Low (-92 dB) | Wide | **Default for waterfall/spectrum** |
 
-**Default**: Hann window. Formula for N-point window:
+**Default for display**: Blackman-Harris 4-coefficient (−92 dB sidelobes).
+With Hann, a −20 dBFS carrier bleeds −51 dBFS sidelobe energy across the full
+bandwidth, raising the apparent noise floor by 30 dB. Blackman-Harris reduces
+that to −112 dBFS (invisible). Trade-off: main lobe is ~8 bins wide vs 4 for Hann.
+
+Hann formula (used for FIR sinc kernel windowing only):
 ```
 w[n] = 0.5·(1 - cos(2π·n / (N-1)))   for n = 0..N-1
+```
+
+Blackman-Harris formula (used for FFT display):
+```
+A = [0.35875, 0.48829, 0.14128, 0.01168]
+w[n] = A[0] - A[1]·cos(2π·n/(N-1)) + A[2]·cos(4π·n/(N-1)) - A[3]·cos(6π·n/(N-1))
 ```
 
 ### Low-pass FIR filter (for decimation)
@@ -273,5 +289,6 @@ Library option: `biquad` crate for IIR filters (simpler, lower CPU).
 | Audio clicking | Buffer underrun | Ring buffer with ≥3 frames headroom |
 | Dropped IQ samples | USB bandwidth exceeded | Cap sample rate at 2.4 MHz max |
 | Gain overload (clipping) | AGC off, strong signal | Expose manual gain control in UI |
+| SSB audio DAC overflow | Hilbert combine peaks at ±1.5 | tanh soft-clip before resampler |
 | FFT size mismatch | N not matching buffer | Assert N == buffer size before FFT |
 | Normalization drift | No reference level | Fix noise floor reference at startup |

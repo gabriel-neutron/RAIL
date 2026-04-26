@@ -31,8 +31,9 @@ pub const AUDIO_RATE_HZ: f32 = 44_100.0;
 
 const CHANNEL_FIR_TAPS: usize = 65;
 const AUDIO_FIR_TAPS: usize = 65;
-/// 50 µs de-emphasis time constant (Europe, `docs/DSP.md` §4).
-const DEEMPHASIS_TAU_S: f32 = 50e-6;
+/// 75 µs de-emphasis time constant (Americas default, `docs/DSP.md` §4).
+/// Europe/Japan use 50 µs (`50e-6`). Change this constant to match your region.
+const DEEMPHASIS_TAU_S: f32 = 75e-6;
 /// CW sidetone BPF center frequency — standard 700 Hz offset (docs/DSP.md §6).
 const CW_BPF_CENTER_HZ: f32 = 700.0;
 /// CW BPF −3 dB bandwidth (docs/DSP.md §6).
@@ -264,6 +265,8 @@ impl DemodChain {
             self.cw_bpf.process_inplace(&mut self.filtered_audio);
         }
 
+        soft_limit(&mut self.filtered_audio);
+
         let mark = audio.len();
         self.resampler.process(&self.filtered_audio, audio);
 
@@ -334,6 +337,17 @@ fn ssb_for_mode(mode: DemodMode) -> SsbDemodulator {
     match mode {
         DemodMode::Lsb => SsbDemodulator::new_lsb(),
         _ => SsbDemodulator::new_usb(),
+    }
+}
+
+/// tanh soft-clip to keep audio in (−1, 1). tanh(x) ≈ x for small x and
+/// approaches ±1 asymptotically — no hard discontinuity unlike hard clipping.
+/// Applied before the resampler so SSB peaks (can reach ±1.5) never reach
+/// the Web Audio API as out-of-range values. See `docs/DSP.md` §8.
+#[inline]
+fn soft_limit(buf: &mut [f32]) {
+    for s in buf.iter_mut() {
+        *s = s.tanh();
     }
 }
 

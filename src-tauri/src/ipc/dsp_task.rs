@@ -106,6 +106,13 @@ struct DspTaskCtx<R: Runtime> {
     audio_frame_buf: Vec<f32>,
     phase_idx: u32,
     last_emit: Instant,
+    /// Linear-magnitude accumulator for FFT frame averaging.
+    /// Accumulates |X[k]| (linear, not dB) across all frames between emits
+    /// so the emitted spectrum is a true time-average, not a single snapshot.
+    /// Reset to zero after each emit. See `docs/DSP.md` §3.
+    spectral_accum: Vec<f32>,
+    /// Count of frames accumulated into `spectral_accum` since the last emit.
+    accum_frames: u32,
     peak_dbfs: f32,
     last_level_emit: Instant,
     sample_rate_hz: u32,
@@ -167,6 +174,8 @@ impl<R: Runtime> DspTaskCtx<R> {
             audio_frame_buf: Vec::with_capacity(AUDIO_CHUNK_SAMPLES),
             phase_idx: 0,
             last_emit: Instant::now() - MIN_EMIT_INTERVAL,
+            spectral_accum: vec![0.0_f32; FFT_SIZE],
+            accum_frames: 0,
             peak_dbfs: f32::NEG_INFINITY,
             last_level_emit: Instant::now() - MIN_LEVEL_EMIT_INTERVAL,
             sample_rate_hz,
@@ -462,52 +471,69 @@ impl<R: Runtime> DspTaskCtx<R> {
         self.fft_pending.extend_from_slice(&self.shifted);
 
         while self.fft_pending.len() >= FFT_SIZE {
-            let drop_frame = self.last_emit.elapsed() < MIN_EMIT_INTERVAL;
             take_frame(&mut self.fft_pending, &mut self.frame_buf, FFT_SIZE);
 
-            if drop_frame {
-                continue;
-            }
-
+            // FFT every frame and accumulate linear magnitude so the emitted
+            // spectrum is a time-average over all frames in the emit window,
+            // not a single snapshot. This gives ~5 dB SNR improvement over
+            // the previous approach of dropping 9 out of 10 frames.
+            // Per-bin peak (scanner) is updated from raw per-frame dB values
+            // so the scanner still sees instantaneous peaks. See docs/DSP.md §3.
             match self.builder.process_shifted(&self.frame_buf) {
-                Ok(spectrum) => {
-                    // Snapshot for the classifier (runs at a lower rate than
-                    // waterfall emit — see `emit_classification`).
-                    self.last_spectrum.clear();
-                    self.last_spectrum.extend_from_slice(spectrum);
-
-                    // Per-bin peak accumulator for the scanner. try_lock so
-                    // the DSP task never stalls if the scanner holds the lock
-                    // briefly to reset or read.
-                    if let Ok(mut acc) = self.max_dbfs_per_bin.try_lock() {
-                        if acc.len() != spectrum.len() {
-                            acc.resize(spectrum.len(), f32::NEG_INFINITY);
+                Ok(spectrum_db) => {
+                    // Update per-bin peak accumulator for the scanner before
+                    // averaging. try_lock so the DSP task never stalls.
+                    if let Ok(mut peak_acc) = self.max_dbfs_per_bin.try_lock() {
+                        if peak_acc.len() != spectrum_db.len() {
+                            peak_acc.resize(spectrum_db.len(), f32::NEG_INFINITY);
                         }
-                        for (a, &s) in acc.iter_mut().zip(spectrum.iter()) {
+                        for (a, &s) in peak_acc.iter_mut().zip(spectrum_db.iter()) {
                             if s > *a {
                                 *a = s;
                             }
                         }
                     }
 
-                    let bytes: &[u8] = cast_slice(spectrum);
-                    // `Vec<u8>` allocation here is forced by Tauri's
-                    // `InvokeResponseBody::Raw(Vec<u8>)` API — leave as-is
-                    // unless upstream exposes a borrowed variant.
-                    if let Err(e) = channel.send(InvokeResponseBody::Raw(bytes.to_vec())) {
-                        log::warn!("waterfall channel send failed: {e}; cancelling reader");
-                        if let Some(c) = canceler {
-                            c.cancel();
-                        }
-                        return false;
+                    // Accumulate linear magnitude (|X[k]|, not power or dB) for
+                    // unbiased amplitude averaging. 10^(db/20) inverts 20·log10.
+                    for (acc, &db) in self.spectral_accum.iter_mut().zip(spectrum_db) {
+                        *acc += 10_f32.powf(db / 20.0);
                     }
-                    record_waterfall_emit_interval();
-                    self.last_emit = Instant::now();
+                    self.accum_frames += 1;
                 }
-                Err(e) => {
-                    log::warn!("frame build failed: {e}");
-                }
+                Err(e) => log::warn!("frame build failed: {e}"),
             }
+
+            if self.last_emit.elapsed() < MIN_EMIT_INTERVAL || self.accum_frames == 0 {
+                continue;
+            }
+
+            // Emit averaged spectrum. Convert back to dBFS: 20·log10(avg_mag).
+            let count = self.accum_frames as f32;
+            self.last_spectrum.clear();
+            self.last_spectrum.extend(
+                self.spectral_accum
+                    .iter()
+                    .map(|&a| 20.0 * (a / count).log10()),
+            );
+
+            // Reset accumulator for the next window.
+            self.spectral_accum.iter_mut().for_each(|a| *a = 0.0);
+            self.accum_frames = 0;
+            self.last_emit = Instant::now();
+
+            let bytes: &[u8] = cast_slice(&self.last_spectrum);
+            // `Vec<u8>` allocation here is forced by Tauri's
+            // `InvokeResponseBody::Raw(Vec<u8>)` API — leave as-is
+            // unless upstream exposes a borrowed variant.
+            if let Err(e) = channel.send(InvokeResponseBody::Raw(bytes.to_vec())) {
+                log::warn!("waterfall channel send failed: {e}; cancelling reader");
+                if let Some(c) = canceler {
+                    c.cancel();
+                }
+                return false;
+            }
+            record_waterfall_emit_interval();
         }
         true
     }

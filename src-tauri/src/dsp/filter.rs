@@ -12,8 +12,8 @@ use num_complex::Complex;
 
 /// N-point Hann window: `w[n] = 0.5 · (1 − cos(2π·n / (N−1)))`.
 ///
-/// See `docs/DSP.md` §7. Default choice for the waterfall FFT (medium
-/// side-lobe suppression, narrow main lobe).
+/// See `docs/DSP.md` §7. Kept for FIR filter design (sinc_lowpass_taps).
+/// For waterfall/spectrum display, prefer `blackman_harris_window`.
 pub fn hann_window(n: usize) -> Vec<f32> {
     if n < 2 {
         return vec![1.0; n];
@@ -21,6 +21,26 @@ pub fn hann_window(n: usize) -> Vec<f32> {
     let denom = (n - 1) as f32;
     (0..n)
         .map(|i| 0.5 * (1.0 - (2.0 * PI * i as f32 / denom).cos()))
+        .collect()
+}
+
+/// 4-coefficient Blackman-Harris window. Side-lobe rejection: −92 dB vs
+/// Hann's −31 dB at the cost of a wider main lobe (~8 bins vs ~4).
+///
+/// Used for waterfall/spectrum display where strong adjacent carriers would
+/// otherwise bleed 20–50 dB of sidelobe energy into the noise floor.
+/// See `docs/DSP.md` §7.
+pub fn blackman_harris_window(n: usize) -> Vec<f32> {
+    if n < 2 {
+        return vec![1.0; n];
+    }
+    const A: [f32; 4] = [0.35875, 0.48829, 0.14128, 0.01168];
+    let denom = (n - 1) as f32;
+    (0..n)
+        .map(|i| {
+            let x = 2.0 * PI * i as f32 / denom;
+            A[0] - A[1] * x.cos() + A[2] * (2.0 * x).cos() - A[3] * (3.0 * x).cos()
+        })
         .collect()
 }
 
@@ -493,6 +513,31 @@ mod tests {
         let max = w.iter().cloned().fold(f32::MIN, f32::max);
         assert!((w[4] - max).abs() < 1e-6);
         assert!((w[4] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn blackman_harris_edges_near_zero() {
+        // BH edges equal A[0]-A[1]+A[2]-A[3] ≈ 6e-5; not exactly 0 like Hann.
+        let w = blackman_harris_window(8);
+        assert!(w[0].abs() < 1e-3);
+        assert!(w[7].abs() < 1e-3);
+    }
+
+    #[test]
+    fn blackman_harris_symmetric() {
+        let w = blackman_harris_window(16);
+        for i in 0..8 {
+            assert!((w[i] - w[15 - i]).abs() < 1e-6, "asymmetry at i={i}");
+        }
+    }
+
+    #[test]
+    fn blackman_harris_peak_at_center() {
+        // For odd N, center tap = sum of all A coefficients = 1.0 exactly.
+        let w = blackman_harris_window(9);
+        let max = w.iter().cloned().fold(f32::MIN, f32::max);
+        assert!((w[4] - max).abs() < 1e-6);
+        assert!((w[4] - 1.0).abs() < 1e-4);
     }
 
     #[test]

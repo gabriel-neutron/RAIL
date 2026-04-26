@@ -7,7 +7,7 @@ use std::sync::Arc;
 use num_complex::Complex;
 use rustfft::{Fft, FftPlanner};
 
-use crate::dsp::filter::hann_window;
+use crate::dsp::filter::blackman_harris_window;
 
 /// Noise-floor clamp below which dB values are pinned, preventing
 /// `-inf` when a bin magnitude is zero.
@@ -33,7 +33,7 @@ impl FftProcessor {
         let mut planner = FftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(n);
         let scratch_len = fft.get_inplace_scratch_len();
-        let window = hann_window(n);
+        let window = blackman_harris_window(n);
         let norm = window.iter().sum::<f32>();
         Self {
             fft,

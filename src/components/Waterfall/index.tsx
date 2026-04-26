@@ -13,6 +13,7 @@ const WATERFALL_HEIGHT = 360;
 const SPECTRUM_HEIGHT = 90;
 const DB_FLOOR_DEFAULT = -100;
 const DB_CEIL_DEFAULT = -20;
+const SMOOTH_DEFAULT = 75;
 /// Cumulative pointer-motion threshold (px) that distinguishes a
 /// click-to-tune from a pan-to-retune gesture.
 const DRAG_THRESHOLD_PX = 4;
@@ -84,9 +85,9 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
   const handleCeilChange = (v: number) => setDbCeil(Math.max(v, dbFloor + 10));
 
   // Smooth = 0 → alpha 1.0 (raw, no averaging).
-  // Smooth = 65 → alpha 0.35 (balanced default).
+  // Smooth = 75 → alpha 0.25 (balanced default).
   // Smooth = 95 → alpha 0.05 (very smooth, slow to respond).
-  const [smooth, setSmooth] = useState(65);
+  const [smooth, setSmooth] = useState(SMOOTH_DEFAULT);
   const smoothRef = useRef(1.0 - smooth / 100);
   useEffect(() => { smoothRef.current = 1.0 - smooth / 100; }, [smooth]);
   const avgFrameRef = useRef<Float32Array | null>(null);
