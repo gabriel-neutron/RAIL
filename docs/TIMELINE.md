@@ -8,10 +8,10 @@
 3. [Phase 14 — UX improvements](#phase-14--ux-improvements)
 4. [Phase 15 — Coverage and classifier expansion](#phase-15--coverage-and-classifier-expansion)
 5. [Phase 16 — Advanced DSP](#phase-16--advanced-dsp)
-6. [Phase 17 — Decoder foundation](#phase-17--decoder-foundation)
-7. [Phase 18 — ADS-B 1090](#phase-18--ads-b-1090)
-8. [Phase 19 — APRS / Bell 202](#phase-19--aprs--bell-202)
-9. [Phase 20 — RDS subcarrier](#phase-20--rds-subcarrier)
+6. [Phase 17 — FM demod first: RDS subcarrier](#phase-17--fm-demod-first-rds-subcarrier)
+7. [Phase 18 — Decoder foundation](#phase-18--decoder-foundation)
+8. [Phase 19 — ADS-B 1090](#phase-19--ads-b-1090)
+9. [Phase 20 — APRS / Bell 202](#phase-20--aprs--bell-202)
 10. [Phase 21 — POCSAG](#phase-21--pocsag)
 11. [Phase 22 — Integration hardening](#phase-22--integration-hardening)
 12. [What not to build](#what-not-to-build)
@@ -42,7 +42,29 @@
 
 ---
 
-## Phase 17 — Decoder foundation
+## Phase 17 — FM demod first: RDS subcarrier
+
+- [ ] **Implement RDS subcarrier decoder** — `src-tauri/src/decoders/rds.rs`
+      Input: WBFM baseband at 256 kHz (pre-deemphasis);
+      57 kHz pilot extraction via 2× 19 kHz pilot quadrature correlation;
+      BPSK symbol recovery at 1187.5 Bd; differential decode;
+      26-bit block + 10-bit checkword (RDS standard Annex B);
+      Group decode: 0A/0B (PS name), 2A/2B (RadioText), 4A (clock), 14B (EON).
+      Frequency-prior gate: center in 87_500_000–108_000_000 Hz AND mode = FM.
+      Unit tests: synthetic 57 kHz BPSK group → assert block decode.
+      *(16–20 h)*
+
+- [ ] **Emit RDS groups to the Decoder Panel**
+      Add `RdsGroup` event fields and display PS name / RadioText as the key
+      collapsed-row fields when present.
+      *(2–3 h)*
+
+**Exit criterion**: Tuning to a strong FM station shows RDS PS name within
+5 seconds. RDS tests pass under `cargo test`.
+
+---
+
+## Phase 18 — Decoder foundation
 
 **Goal**: establish the shared decoder architecture and UI surface so each
 protocol can be added independently.
@@ -78,7 +100,7 @@ the panel from the menu. No protocol-specific parser is required yet.
 
 ---
 
-## Phase 18 — ADS-B 1090
+## Phase 19 — ADS-B 1090
 
 - [ ] **Implement ADS-B 1090 decoder** — `src-tauri/src/decoders/adsb.rs`
       Pulse detector on `|IQ|` magnitude; preamble sync (8-pulse pattern at
@@ -101,7 +123,7 @@ aircraft frames in the Decoder Panel within 30 seconds. ADS-B tests pass under
 
 ---
 
-## Phase 19 — APRS / Bell 202
+## Phase 20 — APRS / Bell 202
 
 - [ ] **Implement APRS / Bell 202 decoder** — `src-tauri/src/decoders/aprs.rs`
       Input: NFM discriminator output (already in `DemodChain::process`);
@@ -119,28 +141,6 @@ aircraft frames in the Decoder Panel within 30 seconds. ADS-B tests pass under
 
 **Exit criterion**: Tuning to 144.390 MHz or 144.800 MHz shows APRS packets
 where local traffic exists. APRS tests pass under `cargo test`.
-
----
-
-## Phase 20 — RDS subcarrier
-
-- [ ] **Implement RDS subcarrier decoder** — `src-tauri/src/decoders/rds.rs`
-      Input: WBFM baseband at 256 kHz (pre-deemphasis);
-      57 kHz pilot extraction via 2× 19 kHz pilot quadrature correlation;
-      BPSK symbol recovery at 1187.5 Bd; differential decode;
-      26-bit block + 10-bit checkword (RDS standard Annex B);
-      Group decode: 0A/0B (PS name), 2A/2B (RadioText), 4A (clock), 14B (EON).
-      Frequency-prior gate: center in 87_500_000–108_000_000 Hz AND mode = FM.
-      Unit tests: synthetic 57 kHz BPSK group → assert block decode.
-      *(16–20 h)*
-
-- [ ] **Emit RDS groups to the Decoder Panel**
-      Add `RdsGroup` event fields and display PS name / RadioText as the key
-      collapsed-row fields when present.
-      *(2–3 h)*
-
-**Exit criterion**: Tuning to a strong FM station shows RDS PS name within
-5 seconds. RDS tests pass under `cargo test`.
 
 ---
 
