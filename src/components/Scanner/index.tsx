@@ -222,69 +222,75 @@ export const Scanner = () => {
       <div className="scanner-header">Scanner</div>
 
       <div className="scanner-fields">
-        <span className="scanner-label">Start</span>
-        <input
-          type="number"
-          className="scanner-input"
-          value={startMhz}
-          onChange={(e) => setStartMhz(e.target.value)}
-          disabled={scanning}
-          step="0.1"
-          min="0"
-          aria-label="Scan start frequency in MHz"
-        />
-        <span className="scanner-unit">MHz</span>
+        <div className="scanner-field-row">
+          <span className="scanner-label">Start</span>
+          <input
+            type="number"
+            className="scanner-input"
+            value={startMhz}
+            onChange={(e) => setStartMhz(e.target.value)}
+            disabled={scanning}
+            step="0.1"
+            min="0"
+            aria-label="Scan start frequency in MHz"
+          />
+          <span className="scanner-unit">MHz</span>
 
-        <span className="scanner-label">Stop</span>
-        <input
-          type="number"
-          className="scanner-input"
-          value={stopMhz}
-          onChange={(e) => setStopMhz(e.target.value)}
-          disabled={scanning}
-          step="0.1"
-          min="0"
-          aria-label="Scan stop frequency in MHz"
-        />
-        <span className="scanner-unit">MHz</span>
+          <span className="scanner-label">Stop</span>
+          <input
+            type="number"
+            className="scanner-input"
+            value={stopMhz}
+            onChange={(e) => setStopMhz(e.target.value)}
+            disabled={scanning}
+            step="0.1"
+            min="0"
+            aria-label="Scan stop frequency in MHz"
+          />
+          <span className="scanner-unit">MHz</span>
+        </div>
 
-        <span className="scanner-label">Step</span>
-        <input
-          type="number"
-          className="scanner-input"
-          value={stepKhz}
-          onChange={(e) => setStepKhz(e.target.value)}
-          disabled={scanning}
-          step="100"
-          min="1"
-          aria-label="Scan step size in kHz"
-        />
-        <span className="scanner-unit">kHz</span>
+        <div className="scanner-field-row">
+          <span className="scanner-label">Step</span>
+          <input
+            type="number"
+            className="scanner-input"
+            value={stepKhz}
+            onChange={(e) => setStepKhz(e.target.value)}
+            disabled={scanning}
+            step="100"
+            min="1"
+            aria-label="Scan step size in kHz"
+          />
+          <span className="scanner-unit">kHz</span>
 
-        <span className="scanner-label">Dwell</span>
-        <input
-          type="number"
-          className="scanner-input"
-          value={dwellMs}
-          onChange={(e) => setDwellMs(e.target.value)}
-          disabled={scanning}
-          step="50"
-          min="50"
-          aria-label="Dwell time per step in milliseconds"
-        />
-        <span className="scanner-unit">ms</span>
+          <span className="scanner-label">Dwell</span>
+          <input
+            type="number"
+            className="scanner-input"
+            value={dwellMs}
+            onChange={(e) => setDwellMs(e.target.value)}
+            disabled={scanning}
+            step="50"
+            min="50"
+            aria-label="Dwell time per step in milliseconds"
+          />
+          <span className="scanner-unit">ms</span>
+        </div>
 
-        <span className="scanner-label">Min SNR</span>
-        <input
-          type="number"
-          className="scanner-input"
-          value={thresholdSnrDb}
-          onChange={(e) => setThresholdSnrDb(e.target.value)}
-          step="1"
-          min="0"
-          aria-label="Minimum SNR threshold in dB"
-        />
-        <span className="scanner-unit">dB</span>
+        <div className="scanner-field-row">
+          <span className="scanner-label">Min SNR</span>
+          <input
+            type="number"
+            className="scanner-input"
+            value={thresholdSnrDb}
+            onChange={(e) => setThresholdSnrDb(e.target.value)}
+            step="1"
+            min="0"
+            aria-label="Minimum SNR threshold in dB"
+          />
+          <span className="scanner-unit">dB</span>
+        </div>
       </div>
 
       <div className="scanner-separator" role="separator" />

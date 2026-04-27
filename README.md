@@ -26,21 +26,20 @@
 
 | Capability | Details |
 | :--- | :--- |
-| **Live waterfall** | Scrolling spectrogram at 25 fps, canvas-rendered with no third-party library |
-| **Six demodulation modes** | WBFM, NFM, AM, USB, LSB, CW — all DSP in Rust |
-| **Signal meter** | dBFS level + peak hold; 0 dBFS calibrated against a full-scale reference tone |
+| **Live waterfall** | 25 fps, no third-party library |
+| **Six demodulation modes** | WBFM, NFM, AM, USB, LSB, CW |
+| **Signal meter** | dBFS level + peak hold |
 | **Wideband scanner** | Sweeps a user-defined frequency range, auto-discovers active signals |
-| **Signal classifier** | Three-path dispatch: frequency prior → bandwidth → modulation analysis; emits a mode suggestion with SNR and reason |
-| **SigMF capture** | IQ clips, audio recordings, waterfall screenshots; sessions with metadata |
+| **Signal classifier** | Three-path dispatch: frequency prior → bandwidth → modulation analysis; emits a mode suggestion |
+| **SigMF capture** | IQ clips, audio recordings, waterfall screenshots |
 | **Offline replay** | Full pipeline runs against saved IQ files — no hardware needed |
 | **Bookmarks** | Named frequencies with one-click tune |
 | **PPM correction** | Calibration offset per dongle |
-
----
+> **Note:** While all features are implemented in theory, some errors remain unresolved in practice and are still being debugged.
 
 ## Technical proof points
 
-- **Hand-written librtlsdr FFI** — direct binding via `libloading`, no `rtl_tcp` daemon; works with real hardware and CI-fetched prebuilts on all three platforms
+- **Hand-written librtlsdr FFI** — direct binding via `libloading`, no `rtl_tcp` daemon
 - **From-scratch Hilbert FIR phasing** — 129-tap Hilbert filter with matched group-delay compensation on both I/Q paths; used for USB and LSB demodulation
 - **Three-path signal classifier** — frequency prior, bandwidth measurement (6 dB above noise floor), and envelope/asymmetry discrimination; see `docs/SIGNALS.md §5` for the full design
 - **Binary IPC** — waterfall frames and audio stream sent as float32 `ArrayBuffer` Tauri events, not JSON; keeps the 25 fps budget without serialization overhead
@@ -49,17 +48,9 @@
 
 ---
 
-## Intelligence value
+## Why RAIL?
 
-I built RAIL because I wanted to understand what makes a real SIGINT pipeline work — not just call a library and display a plot. The part that required the most deliberate design was the classifier: choosing to put the frequency prior first (rather than running spectral analysis on every frame) was a decision driven by the false-positive problem. When you're monitoring a single known band — FM broadcast, aviation voice, maritime VHF — running envelope variance and sideband asymmetry tests on every emission just introduces cycling. The prior suppresses that. Spectral analysis only runs when the prior returns more than one candidate, which is exactly the case where it adds information (2m amateur: FM voice vs SSB vs CW vs APRS). The asymmetry threshold of 15 dB is higher than you'd set analytically because 4 ms IQ windows over RTL-SDR hardware have enough measurement noise to produce 5–10 dB asymmetry on what is actually a symmetric NFM signal. I documented the threshold choices and the next steps — per-peak dwell, protocol decoder integration, TDOA with multiple receivers — in `docs/SIGNALS.md §6`.
-
----
-
-## Field result
-
-<img src="docs/assets/image.png" alt="Classifier confirming WBFM on FM broadcast at 106 MHz" width="840" />
-
-FM broadcast at 106.076 MHz. Classifier badge: **WBFM confirmed, 42 dB SNR**. The classifier dispatched through the single-prior path (FM broadcast band → one candidate → trust prior directly) and confirmed based on spectral SNR exceeding the 20 dB threshold. Adjacent stations visible in the waterfall at ±200 kHz spacing as expected for broadcast FM.
+I built RAIL because I wanted to understand what makes a real SIGINT pipeline work, not just call a library and display a plot. I implemented the core components I wanted, but I know it is not professional grade yet, and some issues remain unresolved, such as ghost signals and demodulation problems.
 
 ---
 
@@ -82,7 +73,7 @@ npm install
 npm run tauri dev
 ```
 
-**Download the installer** — see [Releases](../../releases) for the Windows `.exe`, macOS `.dmg`, and Linux `.AppImage`.
+**Or download the installer** — see [Releases](../../releases) for the Windows `.exe`, macOS `.dmg`, and Linux `.AppImage`.
 
 ---
 
@@ -95,6 +86,14 @@ No dongle? The repo ships with a short IQ capture at [`docs/assets/demo_iq.sigmf
 ## Going deeper
 
 Architecture, DSP math, and signal reference live in [`docs/`](docs/). Start with [`docs/README.md`](docs/README.md) for the index.
+
+---
+
+## Known issues
+
+* Ghost signals often appear on untuned frequencies, typically 450 Hz away from the tuned value
+* The RDS demodulator does not work
+* Crashes often occur at startup
 
 ---
 
