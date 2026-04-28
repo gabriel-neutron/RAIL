@@ -726,7 +726,12 @@ pub async fn start_scan<R: Runtime>(
             .ok_or_else(|| RailError::InvalidParameter("tuner unavailable".into()))?;
         let lo_offset = lo_offset_hz(session.sample_rate_hz);
         let sample_rate_hz = session.sample_rate_hz;
-        (tuner, lo_offset, session.max_dbfs_per_bin.clone(), sample_rate_hz)
+        (
+            tuner,
+            lo_offset,
+            session.max_dbfs_per_bin.clone(),
+            sample_rate_hz,
+        )
     };
 
     // Cancel any previous scan.

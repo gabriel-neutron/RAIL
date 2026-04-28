@@ -30,3 +30,6 @@ src-tauri/target/
 vendor/librtlsdr-win-x64/*.dll
 vendor/librtlsdr-win-x64/*.lib
 vendor/librtlsdr-win-x64/*.exp
+
+# Slide Generator app 
+RAIL_slides/

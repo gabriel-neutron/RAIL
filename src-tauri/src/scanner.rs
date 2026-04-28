@@ -269,11 +269,7 @@ async fn run_scanner<R: Runtime>(
 /// Byte 0–3: `signal_avg_db` (average power in target channel window).
 /// Byte 4–7: `noise_floor_db` (median of full spectrum — noise reference).
 /// Frontend computes SNR as the difference of the two fields.
-fn emit_step(
-    channel: &Channel<InvokeResponseBody>,
-    signal_avg_db: f32,
-    noise_floor_db: f32,
-) {
+fn emit_step(channel: &Channel<InvokeResponseBody>, signal_avg_db: f32, noise_floor_db: f32) {
     let payload = [signal_avg_db, noise_floor_db];
     let bytes: &[u8] = cast_slice(&payload);
     if let Err(e) = channel.send(InvokeResponseBody::Raw(bytes.to_vec())) {
