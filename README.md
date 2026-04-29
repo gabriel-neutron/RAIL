@@ -6,6 +6,8 @@
 
 **RTL-SDR desktop app — live waterfall, multi-mode demodulation, wideband scanner, and automated signal classification.**
 
+Made  with 🍷, 🥖 and 🧀 in France.
+
 <br />
 
 <img src="docs/assets/image.png" alt="RAIL — FM broadcast at 106 MHz, classified as WBFM at 42 dB SNR" width="960" />
