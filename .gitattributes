@@ -1,1 +1,7 @@
+# Normalise line endings so the codegen drift check is stable across OSes.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.sigmf-data binary
+
 docs/assets/demo_iq.sigmf-data filter=lfs diff=lfs merge=lfs -text
