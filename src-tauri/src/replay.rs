@@ -223,7 +223,7 @@ fn prefill_waterfall(
             continue;
         }
         let mut samples: Vec<Complex<f32>> = Vec::with_capacity(FFT_SIZE);
-        for pair in raw.chunks_exact(BYTES_PER_SAMPLE as usize) {
+        for pair in raw.as_chunks::<{ BYTES_PER_SAMPLE as usize }>().0 {
             let re = f32::from_le_bytes([pair[0], pair[1], pair[2], pair[3]]);
             let im = f32::from_le_bytes([pair[4], pair[5], pair[6], pair[7]]);
             samples.push(Complex::new(re, im));
@@ -390,7 +390,7 @@ pub fn spawn_replay_reader<R: tauri::Runtime>(
                 return;
             }
             let mut samples: Vec<Complex<f32>> = Vec::with_capacity(want);
-            for pair in bytes.chunks_exact(BYTES_PER_SAMPLE as usize) {
+            for pair in bytes.as_chunks::<{ BYTES_PER_SAMPLE as usize }>().0 {
                 let re = f32::from_le_bytes([pair[0], pair[1], pair[2], pair[3]]);
                 let im = f32::from_le_bytes([pair[4], pair[5], pair[6], pair[7]]);
                 samples.push(Complex::new(re, im));
