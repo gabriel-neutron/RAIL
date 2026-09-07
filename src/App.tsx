@@ -41,7 +41,7 @@ const isRailError = (value: unknown): value is RailError => {
     typeof value === "object" &&
     value !== null &&
     "kind" in value &&
-    typeof (value as { kind: unknown }).kind === "string"
+    typeof (value).kind === "string"
   );
 };
 
@@ -111,7 +111,7 @@ function App() {
   useEffect(() => {
     let cancelled = false;
 
-    (async () => {
+    void (async () => {
       try {
         const reply = await ping();
         if (!cancelled) {
