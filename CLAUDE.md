@@ -83,3 +83,15 @@ RAIL (Radio Analysis and Intel Lab) is a Tauri desktop application.
 2. Read `/docs/DSP.md` and `/docs/SIGNALS.md`
 3. If the answer is not there, add it to the correct `/docs/` file before implementing
 4. Flag any math that cannot be verified from docs as `// TODO: verify math — see DSP.md`
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on `gabriel-neutron/RAIL`, driven via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root, created lazily. See `docs/agents/domain.md`.

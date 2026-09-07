@@ -20,6 +20,8 @@
 | `TIMELINE.md` | Development phases, milestones, task ordering | Active |
 | `PERF.md` | Runtime profiling: waterfall LUT vs blit, optional Rust `profile` feature, CSS coverage | Active |
 | `DECODERS.md` | Protocol decoder reference: ADS-B, APRS, RDS, POCSAG — architecture, framing, frequency gating | Active |
+| `agents/issue-tracker.md` | Where agent skills track issues: GitHub Issues via `gh`, conventions and wayfinding ops | Active |
+| `agents/domain.md` | How agent skills consume `CONTEXT.md` / `docs/adr/` when exploring the codebase | Active |
 
 ---
 
@@ -52,3 +54,5 @@ Every time a file in `/docs/` is created or modified:
 - **"How do I handle RTL-SDR errors?"** → `HARDWARE.md`
 - **"How does the ADS-B / APRS / RDS / POCSAG decoder work?"** → `DECODERS.md`
 - **"What protocols are planned and why?"** → `TIMELINE.md` Phases 17–22 + `SIGNALS.md §5.5–5.6`
+- **"Where do agent skills file issues?"** → `agents/issue-tracker.md`
+- **"What domain docs should an agent read first?"** → `agents/domain.md`
