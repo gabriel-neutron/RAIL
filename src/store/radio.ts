@@ -5,7 +5,6 @@ import {
   setBandwidth as setBandwidthCmd,
   setMode as setModeCmd,
   setSquelch as setSquelchCmd,
-  type DemodModeWire,
 } from "../ipc/commands";
 import { type SignalClassificationPayload } from "../ipc/events";
 import { useReplayStore } from "./replay";
@@ -139,7 +138,7 @@ const makeDebouncer = <T,>(
 };
 
 const scheduleMode = makeDebouncer<DemodMode>("set_mode", (mode) =>
-  setModeCmd(mode as DemodModeWire),
+  setModeCmd(mode),
 );
 const scheduleBandwidth = makeDebouncer<number>("set_bandwidth", (hz) =>
   setBandwidthCmd(hz),

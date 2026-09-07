@@ -114,7 +114,7 @@ fn compute_channel_snr(acc: &[f32], sample_rate_hz: u32, step_hz: u32) -> (f32, 
     if all_finite.len() < 16 {
         return (signal_avg_db, f32::NEG_INFINITY);
     }
-    all_finite.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+    all_finite.sort_unstable_by(|a, b| a.total_cmp(b));
     let noise_floor_db = all_finite[all_finite.len() / 2];
 
     (signal_avg_db, noise_floor_db)
@@ -279,6 +279,7 @@ fn emit_step(channel: &Channel<InvokeResponseBody>, signal_avg_db: f32, noise_fl
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::{build_frequency_list, compute_channel_snr};
 
     #[test]

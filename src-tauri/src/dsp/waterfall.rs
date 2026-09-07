@@ -34,7 +34,7 @@ pub fn iq_u8_to_complex(raw: &[u8], out: &mut [Complex<f32>]) -> Result<(), Rail
             out.len()
         )));
     }
-    for (pair, dst) in raw.chunks_exact(2).zip(out.iter_mut()) {
+    for (pair, dst) in raw.as_chunks::<2>().0.iter().zip(out.iter_mut()) {
         let i = pair[0] as f32 * BYTE_TO_FLOAT_SCALE - 1.0;
         let q = pair[1] as f32 * BYTE_TO_FLOAT_SCALE - 1.0;
         *dst = Complex::new(i, q);
@@ -130,6 +130,7 @@ impl FrameBuilder {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
 
     #[test]
@@ -175,7 +176,7 @@ mod tests {
         let n = 64;
         let mut iq = vec![Complex::new(1.0_f32, 0.0); n];
         apply_fs4_shift(&mut iq, 0);
-        let mut fft = crate::dsp::fft::FftProcessor::new(n);
+        let mut fft = FftProcessor::new(n);
         let spectrum = fft.process(&iq);
         let peak_bin = spectrum
             .iter()
@@ -227,7 +228,7 @@ mod tests {
         let mut iq = vec![Complex::new(0.0_f32, 0.0); N];
         iq_u8_to_complex(&raw, &mut iq).unwrap();
         apply_fs4_shift(&mut iq, 0);
-        let mut fft = crate::dsp::fft::FftProcessor::new(N);
+        let mut fft = FftProcessor::new(N);
         let spectrum = fft.process(&iq);
         let peak_bin = spectrum
             .iter()

@@ -190,11 +190,12 @@ impl SigMfStreamWriter {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
     use std::io::Read;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn tmp(label: &str) -> std::path::PathBuf {
+    fn tmp(label: &str) -> PathBuf {
         let mut p = std::env::temp_dir();
         p.push(format!(
             "rail-sigmf-test-{label}-{}",
@@ -244,7 +245,7 @@ mod tests {
             .read_to_end(&mut data)
             .unwrap();
         assert_eq!(data.len(), 7 * 8);
-        for (i, pair) in data.chunks_exact(8).enumerate() {
+        for (i, pair) in data.as_chunks::<8>().0.iter().enumerate() {
             let re = f32::from_le_bytes(pair[0..4].try_into().unwrap());
             let im = f32::from_le_bytes(pair[4..8].try_into().unwrap());
             assert!((re - (i as f32 * 0.1)).abs() < 1e-6);

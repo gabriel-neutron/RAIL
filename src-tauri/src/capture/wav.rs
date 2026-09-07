@@ -181,11 +181,12 @@ impl WavStreamWriter {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
     use std::io::Read;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn tmp(label: &str) -> std::path::PathBuf {
+    fn tmp(label: &str) -> PathBuf {
         let mut p = std::env::temp_dir();
         p.push(format!(
             "rail-wav-test-{label}-{}",
@@ -246,8 +247,8 @@ mod tests {
             36 + 5 * 4
         );
         let payload = &bytes[44..];
-        for (i, chunk) in payload.chunks_exact(4).enumerate() {
-            let got = f32::from_le_bytes(chunk.try_into().unwrap());
+        for (i, chunk) in payload.as_chunks::<4>().0.iter().enumerate() {
+            let got = f32::from_le_bytes(*chunk);
             let expected = [0.1_f32, 0.2, 0.3, -0.4, 0.5][i];
             assert_eq!(got.to_bits(), expected.to_bits());
         }

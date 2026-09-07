@@ -45,7 +45,7 @@ const isRailError = (value: unknown): value is RailError => {
     typeof value === "object" &&
     value !== null &&
     "kind" in value &&
-    typeof (value as { kind: unknown }).kind === "string"
+    typeof (value).kind === "string"
   );
 };
 
@@ -120,7 +120,7 @@ export const useWaterfall = ({
 
     const radio = useRadioStore.getState();
 
-    (async () => {
+    void (async () => {
       await stopStream().catch(() => undefined);
       if (cancelled) return;
       try {

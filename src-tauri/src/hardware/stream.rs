@@ -95,6 +95,7 @@ struct Canceler {
 // SAFETY: `rtlsdr_cancel_async` is the only call we make through this
 // pointer and librtlsdr documents it as safe from any thread.
 unsafe impl Send for Canceler {}
+// SAFETY: as above — `rtlsdr_cancel_async` is callable from any thread.
 unsafe impl Sync for Canceler {}
 
 impl Canceler {

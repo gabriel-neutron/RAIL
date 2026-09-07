@@ -1,0 +1,8 @@
+# Pinning the toolchain keeps CI and local development on the same compiler.
+# A floating "stable" means a Rust release can turn a green PR red with no code
+# change — which is exactly what happened on 1.98.0 (new `chunks_exact_to_as_chunks`
+# lint). Bump this deliberately, in its own commit, so new lints arrive as
+# reviewable work rather than as unrelated CI noise.
+[toolchain]
+channel = "1.98.1"
+components = ["clippy", "rustfmt"]

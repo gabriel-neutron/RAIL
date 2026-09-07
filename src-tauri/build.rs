@@ -10,6 +10,10 @@
 //! copied into the cargo target profile dir so `cargo tauri dev` just
 //! works without the user touching `PATH`. See `docs/TECH_STACK.md` §4.
 
+// A build script signals failure by panicking; `unwrap`/`expect`/`panic!`
+// are the intended error channel here, not a CLAUDE.md violation.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use std::{
     env, fs,
     path::{Path, PathBuf},
