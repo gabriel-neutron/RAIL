@@ -270,7 +270,9 @@ impl RtlSdrDevice {
         buf_num: u32,
         buf_len: u32,
     ) -> Result<(), RailError> {
-        let rc = ffi::rtlsdr_read_async(self.ptr, cb, ctx, buf_num, buf_len);
+        // SAFETY: the caller of this `unsafe fn` upholds the contract documented
+        // above — `self.ptr` is live and `ctx` outlives the async loop.
+        let rc = unsafe { ffi::rtlsdr_read_async(self.ptr, cb, ctx, buf_num, buf_len) };
         if rc != 0 {
             return Err(RailError::StreamError(format!("rtlsdr_read_async -> {rc}")));
         }
@@ -325,6 +327,7 @@ pub struct TunerHandle {
 // are reachable through this type — all documented as thread-safe vs the
 // reader thread.
 unsafe impl Send for TunerHandle {}
+// SAFETY: as above — the reachable calls are thread-safe vs the reader thread.
 unsafe impl Sync for TunerHandle {}
 
 impl TunerHandle {
