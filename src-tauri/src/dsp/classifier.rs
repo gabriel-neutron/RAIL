@@ -140,7 +140,7 @@ pub fn classify(
         .enumerate()
         .filter(|(i, _)| ((*i as isize) - dc_center as isize).unsigned_abs() > dc_guard)
         .filter(|(_, &db)| db > noise_floor + MIN_PEAK_SNR_DB)
-        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap());
+        .max_by(|a, b| a.1.total_cmp(b.1));
 
     let Some((peak_bin, &peak_db)) = peak else {
         return ClassificationResult::no_signal(candidates);
@@ -183,7 +183,11 @@ pub fn classify(
             // Single-prior band: trust the prior directly, no spectral analysis.
             1 => Some(candidates[0]),
             // Multi-candidate band: spectral picks within the prior's set.
-            _ => pick_from_candidates(&candidates, bw_family, is_am_family, asym_db_opt.unwrap()),
+            // `asym_db_opt` is `Some` exactly when `candidates.len() >= 2`,
+            // which is this arm's condition.
+            _ => asym_db_opt.and_then(|asym_db| {
+                pick_from_candidates(&candidates, bw_family, is_am_family, asym_db)
+            }),
         }
     } else {
         None
