@@ -181,11 +181,12 @@ impl WavStreamWriter {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
     use std::io::Read;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn tmp(label: &str) -> std::path::PathBuf {
+    fn tmp(label: &str) -> PathBuf {
         let mut p = std::env::temp_dir();
         p.push(format!(
             "rail-wav-test-{label}-{}",

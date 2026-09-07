@@ -600,6 +600,7 @@ fn compute_iq_rms_dbfs(samples: &[Complex<f32>]) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
 
     #[test]

@@ -782,7 +782,7 @@ pub async fn stop_scan(state: State<'_, AppState>) -> Result<(), RailError> {
 /// Commands from sibling modules are referenced via fully-qualified
 /// paths because `#[tauri::command]` expands into a helper macro next
 /// to the function, and `use` imports don't bring the macro into scope.
-pub fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
         .manage(AppState::default())
         .manage(BookmarksStore::default())
@@ -824,6 +824,7 @@ pub fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::sample_rate_candidates;
 
     #[test]

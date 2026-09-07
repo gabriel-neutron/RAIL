@@ -468,6 +468,7 @@ fn hz_in(freq: u64, lo_hz: u64, hi_hz: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
     use std::f32::consts::PI;
 

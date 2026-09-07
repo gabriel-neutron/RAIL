@@ -279,6 +279,7 @@ fn emit_step(channel: &Channel<InvokeResponseBody>, signal_avg_db: f32, noise_fl
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::{build_frequency_list, compute_channel_snr};
 
     #[test]
