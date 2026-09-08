@@ -126,6 +126,7 @@ pub type OnDisconnect = Box<dyn FnOnce(String) + Send + 'static>;
 pub struct IqCanceler(Arc<Canceler>);
 
 impl IqCanceler {
+    /// Ask the reader thread to stop. Idempotent and safe from any thread.
     pub fn cancel(&self) {
         self.0.cancel();
     }

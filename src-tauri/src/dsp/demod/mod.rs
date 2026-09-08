@@ -48,18 +48,26 @@ const CW_BPF_BW_HZ: f32 = 400.0;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum DemodMode {
+    /// Wideband FM broadcast, 200 kHz channel.
     Fm,
+    /// Narrowband FM voice, 12.5 kHz channel.
     Nfm,
+    /// Amplitude modulation via envelope detection.
     Am,
+    /// Upper-sideband SSB, 3 kHz voice.
     Usb,
+    /// Lower-sideband SSB, 3 kHz voice.
     Lsb,
+    /// Morse: USB phasing plus a 700 Hz bandpass.
     Cw,
 }
 
 /// Runtime control messages from Tauri commands to the DSP task.
 #[derive(Debug, Clone, Copy)]
 pub enum DemodControl {
+    /// Switch the active demodulator mode.
     SetMode(DemodMode),
+    /// Set the channel bandwidth in Hz.
     SetBandwidthHz(f32),
     /// Threshold in dBFS; `f32::NEG_INFINITY` disables squelch.
     SetSquelchDbfs(f32),
@@ -69,8 +77,11 @@ pub enum DemodControl {
 /// apply changes incrementally.
 #[derive(Debug, Clone, Copy)]
 pub struct DemodConfig {
+    /// Active demodulator mode.
     pub mode: DemodMode,
+    /// Channel bandwidth in Hz.
     pub bandwidth_hz: f32,
+    /// Squelch threshold in dBFS; `f32::NEG_INFINITY` disables it.
     pub squelch_dbfs: f32,
 }
 

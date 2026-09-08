@@ -26,6 +26,7 @@ impl FmDiscriminator {
         }
     }
 
+    /// Retune the discriminator gain for a new rate and deviation in Hz, clearing its state.
     pub fn reconfigure(&mut self, sample_rate_hz: f32, max_deviation_hz: f32) {
         self.gain = sample_rate_hz / (2.0 * PI * max_deviation_hz);
         self.prev = Complex::new(0.0, 0.0);

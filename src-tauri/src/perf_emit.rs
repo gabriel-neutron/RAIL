@@ -81,6 +81,7 @@ mod imp {
     static AUDIO: OnceLock<Mutex<Ring>> = OnceLock::new();
     static SIGNAL_LEVEL: OnceLock<Mutex<Ring>> = OnceLock::new();
 
+    /// Record one waterfall-frame send and log the interval statistics periodically.
     pub fn record_waterfall_emit_interval() {
         if !enabled() {
             return;
@@ -92,6 +93,7 @@ mod imp {
         }
     }
 
+    /// Record one audio-chunk send and log the interval statistics periodically.
     pub fn record_audio_emit_interval() {
         if !enabled() {
             return;
@@ -103,6 +105,7 @@ mod imp {
         }
     }
 
+    /// Record one signal-level emit and log the interval statistics periodically.
     pub fn record_signal_level_emit_interval() {
         if !enabled() {
             return;

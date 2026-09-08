@@ -106,11 +106,16 @@ pub async fn stop_stream(state: State<'_, AppState>) -> Result<(), RailError> {
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetGainArgs {
+    /// `true` to hand gain control to the tuner's AGC.
     pub auto: bool,
+    /// Manual gain in tenths of a dB; required when `auto` is `false`.
     #[serde(default)]
     pub tenths_db: Option<i32>,
 }
 
+/// Switch the tuner between AGC and a manual gain, then record the choice on the control seam.
+///
+/// Errors when no stream is running, during replay, when the tuner is unavailable, or when a manual gain is missing from or outside the tuner's supported set.
 #[tauri::command]
 pub fn set_gain(args: SetGainArgs, state: State<'_, AppState>) -> Result<(), RailError> {
     let mut guard = state.session.lock().map_err(session_poisoned)?;
@@ -156,15 +161,21 @@ pub fn set_gain(args: SetGainArgs, state: State<'_, AppState>) -> Result<(), Rai
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RetuneArgs {
+    /// Requested centre frequency in Hz.
     pub frequency_hz: u32,
 }
 
+/// Reply for [`retune`].
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RetuneReply {
+    /// Centre frequency the tuner actually settled on, in Hz.
     pub frequency_hz: u32,
 }
 
+/// Retune the tuner, compensating for the `fs/4` LO offset, and report the frequency reached.
+///
+/// Errors when no stream is running, during replay, or when the tuner is unavailable.
 #[tauri::command]
 pub fn retune(args: RetuneArgs, state: State<'_, AppState>) -> Result<RetuneReply, RailError> {
     let mut guard = state.session.lock().map_err(session_poisoned)?;
@@ -197,9 +208,13 @@ pub fn retune(args: RetuneArgs, state: State<'_, AppState>) -> Result<RetuneRepl
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetPpmArgs {
+    /// Crystal frequency correction in parts per million.
     pub ppm: i32,
 }
 
+/// Apply a crystal frequency correction to the tuner.
+///
+/// Errors when no stream is running, during replay, or when the tuner is unavailable.
 #[tauri::command]
 pub fn set_ppm(args: SetPpmArgs, state: State<'_, AppState>) -> Result<(), RailError> {
     let mut guard = state.session.lock().map_err(session_poisoned)?;
@@ -227,9 +242,14 @@ pub fn set_ppm(args: SetPpmArgs, state: State<'_, AppState>) -> Result<(), RailE
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetModeArgs {
+    /// Demodulator mode wire-name: one of `"FM"`, `"NFM"`, `"AM"`, `"USB"`,
+    /// `"LSB"`, `"CW"`.
     pub mode: String,
 }
 
+/// Switch the demodulator mode.
+///
+/// Errors when no stream is running or the mode wire-name is unknown.
 #[tauri::command]
 pub fn set_mode(args: SetModeArgs, state: State<'_, AppState>) -> Result<(), RailError> {
     send_control(&state, DspControl::SetMode(parse_mode(&args.mode)?))
@@ -239,9 +259,13 @@ pub fn set_mode(args: SetModeArgs, state: State<'_, AppState>) -> Result<(), Rai
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetBandwidthArgs {
+    /// Channel filter bandwidth in Hz; must be at least 1 kHz.
     pub bandwidth_hz: u32,
 }
 
+/// Set the channel filter bandwidth.
+///
+/// Errors when no stream is running or the bandwidth is below 1 kHz.
 #[tauri::command]
 pub fn set_bandwidth(args: SetBandwidthArgs, state: State<'_, AppState>) -> Result<(), RailError> {
     if args.bandwidth_hz < 1_000 {
@@ -256,9 +280,13 @@ pub fn set_bandwidth(args: SetBandwidthArgs, state: State<'_, AppState>) -> Resu
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetSquelchArgs {
+    /// Squelch threshold in dBFS; `None` or a non-finite value disables the gate.
     pub threshold_dbfs: Option<f32>,
 }
 
+/// Set or clear the squelch threshold.
+///
+/// Errors when no stream is running.
 #[tauri::command]
 pub fn set_squelch(args: SetSquelchArgs, state: State<'_, AppState>) -> Result<(), RailError> {
     send_control(
@@ -280,7 +308,9 @@ fn send_control(state: &State<'_, AppState>, msg: DspControl) -> Result<(), Rail
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddBookmarkArgs {
+    /// Display name for the bookmark.
     pub name: String,
+    /// Bookmarked centre frequency in Hz.
     pub frequency_hz: u32,
     /// Demodulation mode at save time — forwarded as-is (no validation needed;
     /// backend stores whatever the frontend sends).
@@ -289,6 +319,9 @@ pub struct AddBookmarkArgs {
     pub bandwidth_hz: Option<u32>,
 }
 
+/// List the stored bookmarks.
+///
+/// Errors when the store cannot be read.
 #[tauri::command]
 pub fn list_bookmarks<R: Runtime>(
     app: AppHandle<R>,
@@ -297,6 +330,9 @@ pub fn list_bookmarks<R: Runtime>(
     store.list(&app)
 }
 
+/// Append a bookmark to the store and return it with its assigned id.
+///
+/// Errors when the store cannot be read or written.
 #[tauri::command]
 pub fn add_bookmark<R: Runtime>(
     app: AppHandle<R>,
@@ -316,9 +352,13 @@ pub fn add_bookmark<R: Runtime>(
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoveBookmarkArgs {
+    /// Identifier of the bookmark to remove.
     pub id: String,
 }
 
+/// Remove a bookmark by id.
+///
+/// Errors when the store cannot be read or written.
 #[tauri::command]
 pub fn remove_bookmark<R: Runtime>(
     app: AppHandle<R>,
@@ -328,12 +368,17 @@ pub fn remove_bookmark<R: Runtime>(
     store.remove(&app, &args.id)
 }
 
+/// Arguments for [`replace_bookmarks`].
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReplaceBookmarksArgs {
+    /// Full replacement bookmark list, in display order.
     pub bookmarks: Vec<Bookmark>,
 }
 
+/// Replace the whole bookmark list and return the stored result.
+///
+/// Errors when the store cannot be written.
 #[tauri::command]
 pub fn replace_bookmarks<R: Runtime>(
     app: AppHandle<R>,

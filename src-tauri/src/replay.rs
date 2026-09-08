@@ -49,17 +49,26 @@ const WATERFALL_PREFILL_ROWS: usize = 360;
 /// Parsed metadata for an on-disk IQ capture.
 #[derive(Debug, Clone)]
 pub struct ReplayInfo {
+    /// Path of the `.sigmf-data` file holding the IQ samples.
     pub data_path: PathBuf,
+    /// Path of the sibling `.sigmf-meta` file this info was parsed from.
     pub meta_path: PathBuf,
+    /// Sample rate of the recorded IQ stream, in Hz.
     pub sample_rate_hz: u32,
+    /// Centre frequency the capture was recorded at, in Hz.
     pub center_frequency_hz: u64,
+    /// Demodulator mode wire-name recorded with the capture.
     pub demod_mode: String,
+    /// Channel filter bandwidth recorded with the capture, in Hz.
     pub filter_bandwidth_hz: u32,
+    /// Total number of complex samples in the data file.
     pub total_samples: u64,
+    /// ISO 8601 timestamp of the first recorded sample.
     pub datetime_iso8601: String,
 }
 
 impl ReplayInfo {
+    /// Playing time of the capture in milliseconds; 0 when the sample rate is unknown.
     pub fn duration_ms(&self) -> u64 {
         if self.sample_rate_hz == 0 {
             return 0;
@@ -104,12 +113,16 @@ impl ReplayInfo {
 
 /// Transport commands the Tauri layer sends to the reader task.
 pub enum ReplayControl {
+    /// Resume playback from the current position.
     Play,
+    /// Hold the current position without tearing the session down.
     Pause,
-    /// Absolute sample index. The reader clamps to `total_samples`.
+    /// Jump to a position in the file. The reader clamps to `total_samples`.
     Seek {
+        /// Absolute sample index to seek to.
         sample_idx: u64,
     },
+    /// End playback and shut the reader task down.
     Stop,
 }
 

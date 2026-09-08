@@ -93,6 +93,7 @@ pub struct FirFilter {
 }
 
 impl FirFilter {
+    /// Build a filter from `taps`, with the delay line zeroed.
     pub fn new(taps: Vec<f32>) -> Self {
         let len = taps.len();
         Self {
@@ -130,6 +131,7 @@ pub struct FirDecimatorComplex {
 }
 
 impl FirDecimatorComplex {
+    /// Build a decimator from `taps` keeping one sample in `m`. Panics if `m` is 0.
     pub fn new(taps: Vec<f32>, m: usize) -> Self {
         assert!(m >= 1, "decimation factor must be >= 1");
         let len = taps.len().max(1);
@@ -201,11 +203,13 @@ pub struct DeemphasisIir {
 }
 
 impl DeemphasisIir {
+    /// Build the de-emphasis filter for a time constant in seconds and a rate in Hz.
     pub fn new(tau_seconds: f32, sample_rate_hz: f32) -> Self {
         let alpha = 1.0 - (-1.0 / (tau_seconds * sample_rate_hz)).exp();
         Self { alpha, prev: 0.0 }
     }
 
+    /// Filter `buf` in place, carrying state across blocks.
     pub fn process(&mut self, buf: &mut [f32]) {
         let a = self.alpha;
         let one_minus_a = 1.0 - a;
@@ -230,6 +234,7 @@ pub struct LinearResampler {
 }
 
 impl LinearResampler {
+    /// Build a resampler for the given input and output rates in Hz. Panics if either is not positive.
     pub fn new(in_rate_hz: f32, out_rate_hz: f32) -> Self {
         assert!(in_rate_hz > 0.0 && out_rate_hz > 0.0);
         Self {
@@ -239,6 +244,7 @@ impl LinearResampler {
         }
     }
 
+    /// Resample `input` into `out`, appending roughly `input.len() * out_rate / in_rate` samples.
     pub fn process(&mut self, input: &[f32], out: &mut Vec<f32>) {
         // `phase` tracks the fractional input index relative to the
         // start of this block. Each output sample advances phase by

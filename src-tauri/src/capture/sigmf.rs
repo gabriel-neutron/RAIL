@@ -20,22 +20,31 @@ use crate::error::RailError;
 /// Global SigMF metadata block.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SigMfGlobal {
+    /// SigMF sample datatype string; RAIL always writes `cf32_le`.
     #[serde(rename = "core:datatype")]
     pub datatype: String,
+    /// Sample rate of the recorded IQ stream, in Hz.
     #[serde(rename = "core:sample_rate")]
     pub sample_rate: u64,
+    /// SigMF specification version the file conforms to.
     #[serde(rename = "core:version")]
     pub version: String,
+    /// Free-text description of the capture.
     #[serde(rename = "core:description")]
     pub description: String,
+    /// Author string written into the metadata.
     #[serde(rename = "core:author")]
     pub author: String,
+    /// Tuner centre frequency at capture-start time, in Hz.
     #[serde(rename = "rail:center_frequency_hz")]
     pub center_frequency_hz: u64,
+    /// Tuner gain at capture-start time, in dB.
     #[serde(rename = "rail:tuner_gain_db")]
     pub tuner_gain_db: f32,
+    /// Demodulator mode active at capture-start time, as its wire-name.
     #[serde(rename = "rail:demod_mode")]
     pub demod_mode: String,
+    /// Channel filter bandwidth at capture-start time, in Hz.
     #[serde(rename = "rail:filter_bandwidth_hz")]
     pub filter_bandwidth_hz: u32,
     /// Classifier label at the time of capture, e.g. `"WBFM"`. `None`
@@ -61,10 +70,13 @@ pub struct SigMfGlobal {
 /// Per-capture entry inside the `captures` array.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SigMfCapture {
+    /// Index of the first sample this entry describes, in samples from the start of the data file.
     #[serde(rename = "core:sample_start")]
     pub sample_start: u64,
+    /// ISO 8601 timestamp of the first sample.
     #[serde(rename = "core:datetime")]
     pub datetime: String,
+    /// Centre frequency for this capture segment, in Hz.
     #[serde(rename = "core:frequency")]
     pub frequency: u64,
 }
@@ -72,8 +84,11 @@ pub struct SigMfCapture {
 /// Full sigmf-meta document.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SigMfMeta {
+    /// Global metadata block.
     pub global: SigMfGlobal,
+    /// Capture segments, in ascending `sample_start` order.
     pub captures: Vec<SigMfCapture>,
+    /// Annotation objects; RAIL writes none today and preserves what it reads.
     pub annotations: Vec<Value>,
 }
 
@@ -81,13 +96,19 @@ pub struct SigMfMeta {
 /// verbatim in the finalized `.sigmf-meta`.
 #[derive(Debug, Clone)]
 pub struct SigMfStartParams {
+    /// Sample rate of the IQ stream to record, in Hz.
     pub sample_rate_hz: u32,
+    /// Tuner centre frequency, in Hz.
     pub center_frequency_hz: u64,
+    /// Tuner gain, in dB.
     pub tuner_gain_db: f32,
+    /// Demodulator mode wire-name.
     pub demod_mode: String,
+    /// Channel filter bandwidth, in Hz.
     pub filter_bandwidth_hz: u32,
     /// Squelch threshold in dBFS; `None` when the gate is disabled.
     pub squelch_dbfs: Option<f32>,
+    /// ISO 8601 timestamp of the first recorded sample.
     pub datetime_iso8601: String,
     /// Classifier label at capture-start time. Forwarded verbatim into
     /// `rail:signal_type_guess` in the finalized `.sigmf-meta`.
@@ -188,10 +209,12 @@ impl SigMfStreamWriter {
         Ok(self.samples_written)
     }
 
+    /// Path of the `.sigmf-data` file being written.
     pub fn data_path(&self) -> &Path {
         &self.data_path
     }
 
+    /// Path of the `.sigmf-meta` file finalized on close.
     pub fn meta_path(&self) -> &Path {
         &self.meta_path
     }

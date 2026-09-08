@@ -35,10 +35,8 @@ tauri-plugin-dialog = "2"
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 unused_qualifications = "warn"
-# CLAUDE.md requires doc comments on all public functions. 171 items are
-# currently undocumented, so this stays off until that backlog is cleared —
-# turning it on now would just be `-D warnings` noise. Tracked in #10.
-missing_docs = "allow"
+# CLAUDE.md requires doc comments on all public items.
+missing_docs = "warn"
 
 [lints.clippy]
 # CLAUDE.md: "No unwrap() in Rust except in tests". Test modules opt out with

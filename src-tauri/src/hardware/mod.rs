@@ -39,7 +39,9 @@ pub use tuner::{RtlSdrTuner, Tuner};
 /// Serializable RTL-SDR device description sent to the frontend.
 #[derive(Debug, Clone, Serialize)]
 pub struct DeviceInfo {
+    /// Zero-based device index, as used by `rtlsdr_open`.
     pub index: u32,
+    /// Device display name reported by librtlsdr.
     pub name: String,
 }
 

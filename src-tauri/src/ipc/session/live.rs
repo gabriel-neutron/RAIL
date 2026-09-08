@@ -108,7 +108,9 @@ async fn open_live_device(requested_sample_rate_hz: u32) -> Result<(RtlSdrDevice
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartStreamArgs {
+    /// Centre frequency to tune on start, in Hz.
     pub frequency_hz: u32,
+    /// Sample rate in Hz; the backend picks a supported default when omitted.
     #[serde(default)]
     pub sample_rate_hz: Option<u32>,
 }
@@ -118,11 +120,17 @@ pub struct StartStreamArgs {
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartStreamReply {
+    /// Number of FFT bins per waterfall frame.
     pub fft_size: usize,
+    /// IQ sample rate the device accepted, in Hz.
     pub sample_rate_hz: u32,
+    /// Centre frequency the tuner settled on, in Hz.
     pub frequency_hz: u32,
+    /// Gains the tuner supports, in tenths of a dB; empty when the tuner reports none.
     pub available_gains_tenths_db: Vec<i32>,
+    /// Demodulated audio sample rate, in Hz.
     pub audio_sample_rate_hz: u32,
+    /// Number of audio samples per chunk on the audio channel.
     pub audio_chunk_samples: usize,
 }
 

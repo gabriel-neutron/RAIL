@@ -46,6 +46,7 @@ pub struct StartScanArgs {
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanStartReply {
+    /// Frequencies the scan will visit, in Hz and in visit order.
     pub frequencies_hz: Vec<u32>,
 }
 

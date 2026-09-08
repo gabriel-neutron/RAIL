@@ -25,8 +25,11 @@ const FILE_NAME: &str = "bookmarks.json";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Bookmark {
+    /// Process-unique identifier, a hex string derived from the creation timestamp.
     pub id: String,
+    /// User-supplied display name.
     pub name: String,
+    /// Bookmarked centre frequency in Hz.
     pub frequency_hz: u32,
     /// Demodulation mode at save time (e.g. `"FM"`, `"NFM"`). `None` for
     /// bookmarks created before Phase 14; restoring a `None` mode is a no-op.

@@ -128,10 +128,12 @@ impl WavStreamWriter {
         Ok(self.samples_written)
     }
 
+    /// Path of the WAV file being written.
     pub fn path(&self) -> &Path {
         &self.path
     }
 
+    /// Sample rate of the recorded audio, in Hz.
     pub fn sample_rate_hz(&self) -> u32 {
         self.sample_rate_hz
     }
