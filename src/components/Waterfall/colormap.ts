@@ -1,12 +1,9 @@
-// Seven-stop perceptual colormap for the waterfall, per docs/DSP.md §3.
+// Waterfall colormap. Stops, hue choice and the monotonic-luminance
+// requirement are specified in docs/DSP.md §3.
 // Returns a packed Uint8ClampedArray of length `size * 3` (RGB triplets).
 
 type Stop = [number, number, number];
 
-// Single-hue amber phosphor ramp: cold tube -> ember -> phosphor -> bloom.
-// One hue rather than a rainbow because the waterfall encodes a single ordered
-// quantity (power); hue changes would imply categories that do not exist.
-// Monotonic in CIE L* from 0.8 to 97.1 so every step reads as "more signal".
 const STOPS: Stop[] = [
   [4, 3, 1], // cold tube (below noise floor)
   [46, 25, 4],

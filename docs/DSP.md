@@ -69,9 +69,29 @@ RTL-SDR USB → IQ buffer (Rust) → FFT → magnitude bins (float32[N])
 **Frontend responsibility**: colormap only (float32 dB value → RGB color).
 Rust must never send RGB. React must never compute FFT or magnitude.
 
-**Recommended colormap**: linear interpolation across:
-`[dark blue → blue → cyan → green → yellow → red]`
-mapped to the dB range `[noise_floor, signal_peak]`.
+**Colormap**: linear interpolation across a seven-stop single-hue amber ramp,
+mapped to the dB range `[noise_floor, signal_peak]`:
+
+| # | RGB | Role |
+|---|---|---|
+| 0 | `4, 3, 1` | cold tube — below the noise floor |
+| 1 | `46, 25, 4` | |
+| 2 | `104, 59, 9` | |
+| 3 | `168, 105, 18` | |
+| 4 | `224, 152, 31` | |
+| 5 | `255, 196, 84` | |
+| 6 | `255, 246, 226` | bloom — peaks |
+
+One hue, not a rainbow: the waterfall encodes a single ordered quantity
+(power), so a hue change would imply a category boundary that does not exist.
+The ramp is strictly monotonic in CIE L\* (0.8 → 97.1), which is the property
+that makes "brighter" mean "more signal" everywhere on the scale; a
+non-monotonic ramp reads as less signal wherever luminance dips. Implemented in
+`src/components/Waterfall/colormap.ts` and enforced by its test.
+
+Superseded the earlier `[dark blue → blue → cyan → green → yellow → red]`
+recommendation, which was not monotonic in luminance (cyan is brighter than
+green) and carried five hue changes.
 
 **Frame rate**: target 25–30 fps. At fs=2.048 MHz and N=8192:
 `T = 8192/2048000 ≈ 4ms per FFT`. Every frame between emits is FFT-processed and
