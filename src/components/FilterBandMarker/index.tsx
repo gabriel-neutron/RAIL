@@ -8,9 +8,13 @@
 // Read-only view of `bandwidthHz`, `sampleRateHz`, `zoom` — redraws
 // only when one of those changes, not per waterfall frame.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
+import { useResizeTick } from "../../hooks/useResizeTick";
 import { useRadioStore } from "../../store/radio";
+import { prepareCanvas2d } from "../../viewport/canvasSizing";
+import { formatHz } from "../../viewport/formatHz";
+import { createSpectrumViewport } from "../../viewport/spectrumViewport";
 
 const HEIGHT_PX = 26;
 const ACCENT = "#7ee7ff";
@@ -31,59 +35,38 @@ const LABEL_MIN_HALF_PX = 24;
 const LABEL_BASELINE = 9;
 const DIAMOND_HALF = 2;
 
-/// Format `bandwidthHz` into a short label. Mirrors FrequencyAxis's
-/// unit choice so the two components read in the same language.
-const formatBandwidth = (hz: number): string => {
-  if (hz >= 1_000_000) {
-    const digits = hz >= 10_000_000 ? 1 : 2;
-    return `${(hz / 1_000_000).toFixed(digits)} MHz`;
-  }
-  if (hz >= 1_000) {
-    const digits = hz >= 100_000 ? 0 : hz >= 10_000 ? 1 : 2;
-    return `${(hz / 1_000).toFixed(digits)} kHz`;
-  }
-  return `${Math.round(hz)} Hz`;
-};
-
 export const FilterBandMarker = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const bandwidthHz = useRadioStore((s) => s.bandwidthHz);
   const sampleRateHz = useRadioStore((s) => s.sampleRateHz);
   const zoom = useRadioStore((s) => s.zoom);
-  // Re-renders when the canvas's layout size changes so the HiDPI
-  // backing buffer stays matched to the CSS size (keeps the bar,
-  // caps, and bandwidth label crisp after any resize).
-  const [resizeTick, setResizeTick] = useState(0);
+  const resizeTick = useResizeTick(canvasRef);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ro = new ResizeObserver(() => setResizeTick((t) => t + 1));
-    ro.observe(canvas);
-    return () => ro.disconnect();
-  }, []);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const dpr = window.devicePixelRatio || 1;
-    const cssWidth = canvas.clientWidth;
-    if (cssWidth <= 0) return;
+    const sized = prepareCanvas2d(canvas, HEIGHT_PX, window.devicePixelRatio || 1);
+    if (!sized) return;
+    const { ctx, cssWidthPx: cssWidth } = sized;
     const cssHeight = HEIGHT_PX;
-    const targetW = Math.max(1, Math.round(cssWidth * dpr));
-    const targetH = Math.max(1, Math.round(cssHeight * dpr));
-    if (canvas.width !== targetW) canvas.width = targetW;
-    if (canvas.height !== targetH) canvas.height = targetH;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
 
-    const spanHz = sampleRateHz / zoom;
-    if (!Number.isFinite(spanHz) || spanHz <= 0) return;
+    // Only the RELATIVE conversion is used here, so the centre is irrelevant
+    // and passed as 0 — this component never subscribes to `frequencyHz`.
+    // The marker is drawn symmetrically about canvas centre rather than via
+    // `hzToX(frequencyHz ± bw/2)`: the tuned centre sits at canvas centre by
+    // construction, and reading it here would redraw the bracket on every
+    // debounced retune during a pan for numerically identical output.
+    const view = createSpectrumViewport({
+      centerHz: 0,
+      sampleRateHz,
+      zoom,
+      cssWidthPx: cssWidth,
+    });
+    if (view === null) return;
 
     const centerX = cssWidth / 2;
-    const halfBwPx = Math.max(1, (bandwidthHz / spanHz) * cssWidth * 0.5);
+    const halfBwPx = Math.max(1, view.hzWidthToPx(bandwidthHz) / 2);
     const rawLeftX = centerX - halfBwPx;
     const rawRightX = centerX + halfBwPx;
     const leftX = Math.max(0, rawLeftX);
@@ -143,7 +126,7 @@ export const FilterBandMarker = () => {
       ctx.textAlign = "center";
       ctx.textBaseline = "alphabetic";
       ctx.fillStyle = LABEL_COLOR;
-      ctx.fillText(formatBandwidth(bandwidthHz), centerX, LABEL_BASELINE);
+      ctx.fillText(formatHz(bandwidthHz), centerX, LABEL_BASELINE);
     }
   }, [bandwidthHz, sampleRateHz, zoom, resizeTick]);
 

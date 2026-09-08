@@ -9,6 +9,7 @@
 6. [USB/LSB/CW demodulation](#6-usblsbcw-demodulation)
 7. [Filter design](#7-filter-design)
 8. [Edge cases and known pitfalls](#8-edge-cases-and-known-pitfalls)
+9. [Display coordinate systems (bin ↔ Hz ↔ pixel)](#9-display-coordinate-systems-bin--hz--pixel)
 
 ---
 
@@ -313,3 +314,93 @@ Library option: `biquad` crate for IIR filters (simpler, lower CPU).
 | SSB audio DAC overflow | Hilbert combine peaks at ±1.5 | tanh soft-clip before resampler |
 | FFT size mismatch | N not matching buffer | Assert N == buffer size before FFT |
 | Normalization drift | No reference level | Fix noise floor reference at startup |
+
+---
+
+## 9. Display coordinate systems (bin ↔ Hz ↔ pixel)
+
+Implemented in `src/viewport/spectrumViewport.ts`, `src/viewport/cellAxis.ts` and
+`src/viewport/canvasSizing.ts`. Every overlay stacked on the spectrum reads
+this section's transform from there rather than rebuilding it.
+
+### 9.1 The three spaces
+
+| Space | Unit | Owner |
+|---|---|---|
+| Bin | FFT bin index, 0 … N−1 after the shift of §2 step 6 | Rust (`N`), cropped for zoom in `Waterfall`'s `cropCenter` |
+| Frequency | real Hz | the tuned centre + the visible span |
+| Pixel | canvas x | one of three pixel spaces — see §9.4 |
+
+### 9.2 Hz ↔ pixel
+
+The visible span at zoom `z` is `span = fs / z`. After the fs/4 mixer of §1–3
+the tuned signal sits at canvas centre, so the span is symmetric about it:
+
+```
+minHz = f − span/2
+maxHz = f + span/2
+x     = (hz − minHz) / span · width
+hz    = minHz + x / width · span
+```
+
+`x ↔ hz` is an exact round trip. Two relative forms drop the centre term:
+`hzWidthToPx(w) = w/span · width` and `pxWidthToHz(p) = p/width · span`. Pan
+gestures must use the relative form — an absolute `xToHz` inside a handler
+that retunes on every move changes `minHz`, which changes the next move's
+mapping, which is a runaway pan.
+
+### 9.3 Bin ↔ pixel
+
+Bin space never passes through Hz. The two directions are deliberately
+asymmetric, because the two consumers need different things:
+
+- `binLeftX(i)  = i / binCount · width` — a **point** map. The spectrum
+  polyline needs one vertex per bin, placed at the bin's left edge.
+- `xToBinIndex(x) = floor(x · binCount / width)` — a **cell** map. The
+  waterfall row needs the bin *covering* a pixel column.
+
+They compose to identity in the direction `xToBinIndex(binLeftX(i)) === i`,
+and only that direction; the reverse lands within one bin width. `binCount`
+is always an input, so `cropCenter` stays the sole owner of what is on screen.
+
+Both directions come from one implementation, `src/viewport/cellAxis.ts`,
+which knows only index / count / width. The scanner's band-activity strip
+draws and hit-tests against the same map with its axis in scan-step index
+over an arbitrary frequency list; it takes the clamped inverse, because its
+x comes from a pointer and can land outside the strip.
+
+### 9.4 The DPR rule
+
+One rule: a canvas's backing store is its CSS size × an explicit
+`pixelRatio`, rounded to whole device pixels, and its 2d context is
+pre-transformed by that ratio so all drawing happens in CSS pixels.
+
+The frequency axis, band guide and filter marker pass
+`window.devicePixelRatio`. The two streaming canvases — the waterfall row and
+the spectrum curve — pass **1**, the one documented exception: both the
+per-pixel LUT loop and the `ImageData` row scale with backing-store width, and
+`PERF.md §1` sets a ~1 ms/frame NO-GO threshold measured without DPR.
+
+That exception is also why the waterfall's drag hit-test can treat
+`canvas.width / rect.width` as 1. Three pixel spaces coexist and must not be
+conflated: CSS pixels (overlays, under `setTransform(dpr, …)`), backing-store
+pixels (the streaming pair), and `getBoundingClientRect().width` (hit-testing).
+
+### 9.5 Known discrepancy: nominal vs true span
+
+The overlays label the **nominal** span `fs / z`. The waterfall actually shows
+
+```
+kept  = max(16, floor(N / z))
+true  = fs · kept / N
+```
+
+so the labelled span is slightly wide at non-integer zoom — exact at z = 1,
+about 0.5 % at z = 50. `cropCenter` also starts at `floor((N − kept) / 2)`,
+which puts the crop half a bin off centre when `N − kept` is odd (~250 Hz at
+z = 64, N = 8192).
+
+Recorded, not fixed. Correcting it moves every tick label, band-bar edge and
+filter bracket at high zoom; the alternative — snapping wheel zoom so
+`floor(N / z)` is exact — changes how zooming feels. That is a product
+decision, tracked in issue #13.

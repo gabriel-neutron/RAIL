@@ -63,7 +63,10 @@ components/    Waterfall, FrequencyControl, ModeSelector, FilterBandMarker,
                SignalMeter, AudioControls, Transport, MenuBar, PpmControl,
                Scanner (band-activity canvas + sweep controls)
 store/         zustand: radio / capture / replay / scanner
-hooks/         useWaterfall, useAudio
+hooks/         useWaterfall, useAudio, useResizeTick
+viewport/      spectrumViewport, cellAxis, canvasSizing, formatHz — the pure
+               bin/Hz/pixel conversions and labels every overlay draws
+               against (DSP.md §9)
 ipc/           transport.ts (port), tauriTransport.ts (the one Tauri-importing
                module), commands.ts, radioControl.ts (control seam), events.ts
 test/          mockTransport.ts, fakeClock.ts — the adapters tests inject

@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
 
 import { useRadioStore, type DemodMode } from "../../store/radio";
+import { formatHz } from "../../viewport/formatHz";
 
 /// Bandwidth presets per mode (Hz). Chosen from `docs/DSP.md` §4–5:
 /// - WBFM broadcast lives in ±100 kHz (200 kHz channel).
@@ -15,10 +16,9 @@ const PRESETS_BY_MODE: Record<DemodMode, number[]> = {
   CW: [500],
 };
 
-const formatBandwidth = (hz: number): string => {
-  if (hz >= 1_000) return `${(hz / 1_000).toFixed(hz % 1_000 === 0 ? 0 : 1)} kHz`;
-  return `${hz} Hz`;
-};
+// Preset buttons sit side by side, so a whole-kHz preset shows no fraction.
+const formatBandwidth = (hz: number): string =>
+  formatHz(hz, { digits: 1, trimWholeUnits: true });
 
 export const FilterControl = () => {
   const mode = useRadioStore((s) => s.mode);

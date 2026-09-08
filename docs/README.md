@@ -51,6 +51,7 @@ Every time a file in `/docs/` is created or modified:
 - **"What should I build next?"** → `TIMELINE.md`
 - **"How do I profile waterfall or Rust emit intervals?"** → `PERF.md`
 - **"What FFT size should I use?"** → `DSP.md`
+- **"Where does canvas x map in Hz?"** → `DSP.md §9`
 - **"How do I handle RTL-SDR errors?"** → `HARDWARE.md`
 - **"How does the ADS-B / APRS / RDS / POCSAG decoder work?"** → `DECODERS.md`
 - **"What protocols are planned and why?"** → `TIMELINE.md` Phases 17–22 + `SIGNALS.md §5.5–5.6`

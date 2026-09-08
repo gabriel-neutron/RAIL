@@ -9,6 +9,7 @@ import { useCaptureStore } from "../../store/capture";
 import { useRadioStore, type DemodMode } from "../../store/radio";
 import { useReplayStore } from "../../store/replay";
 import { useScannerStore } from "../../store/scanner";
+import { formatHz } from "../../viewport/formatHz";
 
 type MenuKey = "file" | "view" | "bookmarks" | "capture" | "bands" | "settings";
 
@@ -23,11 +24,8 @@ const BANDS: Band[] = BAND_ENTRIES.filter((b) => b.priority <= 2).map((b) => ({
 const BOOKMARK_FILE_VERSION = 1;
 const BOOKMARK_EXPORT_NAME = "rail-bookmarks.json";
 
-const formatFrequency = (hz: number): string => {
-  if (hz >= 1_000_000) return `${(hz / 1_000_000).toFixed(3)} MHz`;
-  if (hz >= 1_000) return `${(hz / 1_000).toFixed(3)} kHz`;
-  return `${hz} Hz`;
-};
+// Bookmarks list in a column, so their frequencies keep a fixed width.
+const formatFrequency = (hz: number): string => formatHz(hz, { digits: 3 });
 
 /// Coerce anything we read from a user-supplied JSON into a safe
 /// `Bookmark[]`. Accepts either `{ bookmarks: [...] }` (our own save

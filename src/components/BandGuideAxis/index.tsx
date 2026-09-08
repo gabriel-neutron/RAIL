@@ -1,12 +1,15 @@
 // Canvas row rendering known frequency-band allocations directly on the
 // frequency axis scale. Redraws only when frequency/zoom/store state changes —
-// never per waterfall frame. See docs/DSP.md for the Hz↔pixel transform.
+// never per waterfall frame. See docs/DSP.md §9 for the Hz↔pixel transform.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
 import { BAND_ENTRIES, type BandCategory } from "../../data/bands";
+import { useResizeTick } from "../../hooks/useResizeTick";
 import { useBandGuideStore } from "../../store/bandGuide";
 import { useRadioStore } from "../../store/radio";
+import { prepareCanvas2d } from "../../viewport/canvasSizing";
+import { createSpectrumViewport } from "../../viewport/spectrumViewport";
 
 const HEIGHT_PX = 16;
 const BAR_FILL_ALPHA = "8c"; // 55 % opacity in hex
@@ -30,39 +33,24 @@ export const BandGuideAxis = () => {
   const visible = useBandGuideStore((s) => s.visible);
   const activeCategories = useBandGuideStore((s) => s.activeCategories);
   const region = useBandGuideStore((s) => s.region);
-  const [resizeTick, setResizeTick] = useState(0);
+  const resizeTick = useResizeTick(canvasRef);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ro = new ResizeObserver(() => setResizeTick((t) => t + 1));
-    ro.observe(canvas);
-    return () => ro.disconnect();
-  }, []);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const dpr = window.devicePixelRatio || 1;
-    const cssWidth = canvas.clientWidth;
-    if (cssWidth <= 0) return;
-
-    const targetW = Math.max(1, Math.round(cssWidth * dpr));
-    const targetH = Math.max(1, Math.round(HEIGHT_PX * dpr));
-    if (canvas.width !== targetW) canvas.width = targetW;
-    if (canvas.height !== targetH) canvas.height = targetH;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const sized = prepareCanvas2d(canvas, HEIGHT_PX, window.devicePixelRatio || 1);
+    if (!sized) return;
+    const { ctx, cssWidthPx: cssWidth } = sized;
     ctx.clearRect(0, 0, cssWidth, HEIGHT_PX);
 
-    const spanHz = sampleRateHz / zoom;
-    if (!Number.isFinite(spanHz) || spanHz <= 0) return;
-    const minHz = frequencyHz - spanHz / 2;
-    const maxHz = frequencyHz + spanHz / 2;
-
-    const hzToX = (hz: number) => ((hz - minHz) / spanHz) * cssWidth;
+    const view = createSpectrumViewport({
+      centerHz: frequencyHz,
+      sampleRateHz,
+      zoom,
+      cssWidthPx: cssWidth,
+    });
+    if (view === null) return;
+    const { minHz, maxHz, hzToX } = view;
 
     // Filter to visible, active, and region-matching bands.
     const visible_bands = BAND_ENTRIES.filter(

@@ -9,6 +9,13 @@ import FrequencyAxis from "../FrequencyAxis";
 import BandGuideAxis from "../BandGuideAxis";
 import BandGuideControls from "../BandGuideControls";
 import Spectrum from "../Spectrum";
+import { prepareCanvas2d } from "../../viewport/canvasSizing";
+import {
+  binLeftX,
+  createSpectrumViewport,
+  spanHz,
+  xToBinIndex,
+} from "../../viewport/spectrumViewport";
 import { buildColormapLut } from "./colormap";
 
 const WATERFALL_HEIGHT = 360;
@@ -225,10 +232,18 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
   } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
-  const pxToOffsetHz = (px: number, rectWidth: number): number => {
+  /// Build the viewport a pointer gesture should measure against, from the
+  /// store as it stands at event time. Read live inside the handler, never
+  /// hoisted into a prop or a render-phase value: a drag retunes as it moves,
+  /// so a viewport captured at render would be stale by the next event.
+  const viewportForPointer = (rectWidth: number) => {
     const store = useRadioStore.getState();
-    const displayedSpan = store.sampleRateHz / store.zoom;
-    return (px / rectWidth) * displayedSpan;
+    return createSpectrumViewport({
+      centerHz: store.frequencyHz,
+      sampleRateHz: store.sampleRateHz,
+      zoom: store.zoom,
+      cssWidthPx: rectWidth,
+    });
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -263,7 +278,12 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
     // px→Hz mapping to feel like panning a map. Live retune updates
     // the axis + spectrum + marker; CSS transform visually shifts
     // the cached waterfall rows to follow the cursor.
-    const deltaHz = -pxToOffsetHz(deltaPx, rect.width);
+    // `pxWidthToHz` is relative — span only, no centre term — so the offset
+    // stays measured from `drag.startHz` and the retune cannot feed back into
+    // the next move's mapping.
+    const view = viewportForPointer(rect.width);
+    if (view === null) return;
+    const deltaHz = -view.pxWidthToHz(deltaPx);
     useRadioStore.getState().setFrequency(drag.startHz + deltaHz);
     canvas.style.transform = `translateX(${deltaPx}px)`;
   };
@@ -288,6 +308,9 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
       // breaking continuity with rows that arrive post-release.
       const deltaPxScreen = e.clientX - drag.startX;
       const rect = canvas.getBoundingClientRect();
+      // Backing store to CSS pixels. This is 1:1 only because the waterfall
+      // canvas is prepared at pixelRatio 1 (see viewport/canvasSizing.ts);
+      // a future DPR change has to keep this ratio in step.
       const scale = rect.width > 0 ? canvas.width / rect.width : 1;
       const deltaPxCanvas = Math.round(deltaPxScreen * scale);
       if (deltaPxCanvas !== 0) {
@@ -305,11 +328,13 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
     if (rect.width <= 0) return;
     const store = useRadioStore.getState();
     if (!store.streaming) return;
+    const view = viewportForPointer(rect.width);
+    if (view === null) return;
     const offsetPx = e.clientX - rect.left - rect.width / 2;
-    store.setFrequency(store.frequencyHz + pxToOffsetHz(offsetPx, rect.width));
+    store.setFrequency(store.frequencyHz + view.pxWidthToHz(offsetPx));
   };
 
-  const displayedSpanHz = sampleRateHz / zoom;
+  const displayedSpanHz = spanHz(sampleRateHz, zoom);
 
   return (
     <section className="waterfall">
@@ -423,19 +448,12 @@ function drawWaterfallRow(
   dbCeil: number,
 ): void {
   if (!canvas) return;
-  const ctx = canvas.getContext("2d", { alpha: false });
-  if (!ctx) return;
-
-  // Fill the full CSS-rendered width so zoom never produces a tiny
-  // buffer that the browser has to upscale. clientWidth is 0 before
-  // first layout; fall back to the current attribute width in that case.
-  const targetW = canvas.clientWidth > 0 ? canvas.clientWidth : canvas.width;
-  if (canvas.width !== targetW) {
-    canvas.width = targetW;
-  }
-  if (canvas.height !== WATERFALL_HEIGHT) {
-    canvas.height = WATERFALL_HEIGHT;
-  }
+  // Prepared at pixelRatio 1: this canvas draws in backing-store pixels and
+  // stays 1:1 with its CSS size for the reason documented in
+  // viewport/canvasSizing.ts (the per-frame LUT loop scales with width).
+  const prepared = prepareCanvas2d(canvas, WATERFALL_HEIGHT, 1, { alpha: false });
+  if (!prepared) return;
+  const { ctx } = prepared;
 
   if (
     rowImageRef.current === null ||
@@ -453,7 +471,7 @@ function drawWaterfallRow(
   const binCount = frame.length;
   const canvasW = canvas.width;
   for (let x = 0; x < canvasW; x += 1) {
-    const binIdx = Math.floor((x * binCount) / canvasW);
+    const binIdx = xToBinIndex(x, binCount, canvasW);
     const normalized = Math.max(
       0,
       Math.min(1, (frame[binIdx] - dbFloor) / span),
@@ -513,16 +531,10 @@ function drawSpectrum(
   dbCeil: number,
 ): void {
   if (!canvas) return;
-  const ctx = canvas.getContext("2d", { alpha: true });
-  if (!ctx) return;
-
-  const targetW = canvas.clientWidth > 0 ? canvas.clientWidth : canvas.width;
-  if (canvas.width !== targetW) {
-    canvas.width = targetW;
-  }
-  if (canvas.height !== SPECTRUM_HEIGHT) {
-    canvas.height = SPECTRUM_HEIGHT;
-  }
+  // Also pixelRatio 1 — same reason as the waterfall row above.
+  const prepared = prepareCanvas2d(canvas, SPECTRUM_HEIGHT, 1, { alpha: true });
+  if (!prepared) return;
+  const { ctx } = prepared;
 
   const w = canvas.width;
   const h = canvas.height;
@@ -533,7 +545,7 @@ function drawSpectrum(
     const n = Math.max(0, Math.min(1, (db - dbFloor) / span));
     return h - n * h;
   };
-  const binToX = (i: number): number => (i / frame.length) * w;
+  const binToX = (i: number): number => binLeftX(i, frame.length, w);
 
   // Filled area under the curve.
   const gradient = ctx.createLinearGradient(0, 0, 0, h);
