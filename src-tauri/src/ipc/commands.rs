@@ -8,7 +8,7 @@
 //! Capture, replay, and the DSP worker live in sibling modules:
 //! [`super::capture_cmd`], [`super::replay_cmd`], [`super::dsp_task`].
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -17,15 +17,15 @@ use tauri::{AppHandle, Runtime, State};
 use tokio::sync::mpsc;
 
 use crate::bookmarks::{Bookmark, BookmarksStore};
-use crate::dsp::demod::{DemodChain, DemodControl, DemodMode, AUDIO_RATE_HZ};
+use crate::dsp::demod::{DemodChain, DemodMode, AUDIO_RATE_HZ};
 use crate::dsp::input::DspInput;
 use crate::error::RailError;
 use crate::hardware::stream::{
     IqStream, DEFAULT_USB_BUF_LEN, DEFAULT_USB_BUF_NUM, IQ_CHANNEL_CAPACITY,
 };
 use crate::hardware::{self, DeviceInfo, RtlSdrDevice, RtlSdrTuner, Tuner};
-use crate::ipc::capture_cmd::CaptureControl;
-use crate::ipc::dsp_task::{spawn_dsp_task, AUDIO_CHUNK_SAMPLES, FFT_SIZE};
+use crate::ipc::control::{DspControl, DspControlHandle, RadioParams};
+use crate::ipc::dsp_task::{spawn_dsp_task, DspTaskCfg, AUDIO_CHUNK_SAMPLES, FFT_SIZE};
 use crate::ipc::events::DeviceStatus;
 use crate::replay::{ReplayControl, ReplayInfo};
 
@@ -37,6 +37,9 @@ type _DemodChainMarker = DemodChain;
 
 /// Default RTL-SDR sample rate. Stable per `docs/HARDWARE.md` §4.
 const DEFAULT_SAMPLE_RATE_HZ: u32 = 2_048_000;
+/// Default channel bandwidth (Hz) a new session starts at — WBFM
+/// broadcast. Must match `DemodConfig::default()` in `dsp::demod`.
+const DEFAULT_BANDWIDTH_HZ: u32 = 200_000;
 /// Fallback sample rates to probe if the requested one is rejected by
 /// librtlsdr on a specific tuner/driver combo (`set_sample_rate -> -1`).
 /// Ordered by preference.
@@ -44,7 +47,7 @@ const FALLBACK_SAMPLE_RATES_HZ: [u32; 5] = [2_048_000, 1_800_000, 1_400_000, 1_0
 
 /// Mode names accepted over the wire. Kept in sync with
 /// `src/store/radio.ts :: DemodMode`.
-fn parse_mode(s: &str) -> Result<DemodMode, RailError> {
+pub(crate) fn parse_mode(s: &str) -> Result<DemodMode, RailError> {
     match s {
         "FM" => Ok(DemodMode::Fm),
         "NFM" => Ok(DemodMode::Nfm),
@@ -62,34 +65,22 @@ fn parse_mode(s: &str) -> Result<DemodMode, RailError> {
 ///
 /// A session is either *live* (RTL-SDR reader + tuner hardware) or
 /// *replay* (SigMF file reader). The DSP-facing fields (`dsp`,
-/// `control_tx`, `capture_tx`, radio snapshot) are shared so the
-/// demod-control and capture commands don't care which source is
-/// running. The [`source`](Session::source) enum only covers the
-/// bits that differ between the two modes.
+/// `control`) are shared so the parameter and capture commands do not
+/// care which source is running. Every runtime parameter lives behind
+/// [`control`](Session::control) — the session keeps no shadow copy.
+/// The [`source`](Session::source) enum only covers the bits that
+/// differ between the two modes.
 pub(crate) struct Session {
     /// JoinHandle for the DSP task (stops when the IQ sender drops).
     pub(crate) dsp: Option<tokio::task::JoinHandle<()>>,
     /// Sample rate of the IQ stream feeding the DSP task.
     pub(crate) sample_rate_hz: u32,
-    /// Outbound channel for runtime demod control (mode/bandwidth/squelch).
-    pub(crate) control_tx: mpsc::UnboundedSender<DemodControl>,
-    /// Outbound channel for capture-related requests (audio / IQ).
-    pub(crate) capture_tx: mpsc::UnboundedSender<CaptureControl>,
-    /// Most recent centre frequency, kept in sync with `retune` so the
-    /// capture metadata and suggested filenames always match what the
-    /// user sees.
-    pub(crate) frequency_hz: u32,
-    /// Most recent demod mode (`FM` / `AM`), updated on `set_mode`.
-    pub(crate) mode: String,
-    /// Most recent channel bandwidth (Hz), updated on `set_bandwidth`.
-    pub(crate) bandwidth_hz: u32,
-    /// Most recent manual gain (tenths of dB). `None` while in AGC.
-    pub(crate) gain_tenths_db: Option<i32>,
+    /// The one control seam into the DSP worker: parameter and capture
+    /// messages out, plus the parameter state-of-record the capture
+    /// commands read. See [`crate::ipc::control`].
+    pub(crate) control: DspControlHandle,
     /// Source-specific bits (live hardware vs replay file).
     pub(crate) source: SessionSource,
-    /// Current centre frequency in Hz. Updated by [`retune`] so the
-    /// classifier in the DSP task always uses the live-tuned frequency.
-    pub(crate) center_hz_bits: Arc<AtomicU32>,
     /// Per-bin peak dBFS accumulator shared with the scanner task.
     /// The DSP task updates this every waterfall frame; the scanner resets
     /// it after settle and reads it at dwell end for burst-aware detection.
@@ -280,8 +271,16 @@ pub async fn start_stream<R: Runtime>(
     let actual_freq = tuner.center_freq().saturating_add(offset);
 
     let (iq_tx, iq_rx) = mpsc::channel::<DspInput>(IQ_CHANNEL_CAPACITY);
-    let (control_tx, control_rx) = mpsc::unbounded_channel::<DemodControl>();
-    let (capture_tx, capture_rx) = mpsc::unbounded_channel::<CaptureControl>();
+    // Seed the seam with the same defaults `DemodConfig::default()` uses,
+    // so the worker and the state-of-record agree from the first sample.
+    let (control, control_rx) = DspControlHandle::new(RadioParams {
+        center_hz: actual_freq,
+        mode: DemodMode::Fm,
+        bandwidth_hz: DEFAULT_BANDWIDTH_HZ,
+        squelch_dbfs: None,
+        gain_tenths_db: None,
+        ppm: 0,
+    });
 
     // Fires from the reader thread if the dongle is unplugged mid-stream.
     let disconnect_app = app.clone();
@@ -299,40 +298,30 @@ pub async fn start_stream<R: Runtime>(
     )?;
     let canceler = stream.canceler();
 
-    let latest_dbfs_bits = Arc::new(AtomicU32::new(f32::NEG_INFINITY.to_bits()));
-    let center_hz_bits = Arc::new(AtomicU32::new(actual_freq));
     let max_dbfs_per_bin = Arc::new(Mutex::new(vec![f32::NEG_INFINITY; FFT_SIZE]));
 
-    let dsp_handle = spawn_dsp_task(
-        app.clone(),
+    let dsp_handle = spawn_dsp_task(DspTaskCfg {
+        app: app.clone(),
         iq_rx,
         waterfall_channel,
         audio_channel,
         control_rx,
-        capture_rx,
-        Some(canceler),
-        sample_rate,
-        latest_dbfs_bits.clone(),
-        center_hz_bits.clone(),
-        max_dbfs_per_bin.clone(),
-    );
+        canceler: Some(canceler),
+        sample_rate_hz: sample_rate,
+        initial_params: control.snapshot()?,
+        max_dbfs_per_bin: max_dbfs_per_bin.clone(),
+    });
 
     let mut guard = state.session.lock().map_err(session_poisoned)?;
     *guard = Some(Session {
         dsp: Some(dsp_handle),
         sample_rate_hz: sample_rate,
-        control_tx,
-        capture_tx,
-        frequency_hz: actual_freq,
-        mode: "FM".into(),
-        bandwidth_hz: 200_000,
-        gain_tenths_db: None,
+        control,
         source: SessionSource::Live(LiveBits {
             stream: Some(stream),
             tuner: Some(tuner),
             gains: gains.clone(),
         }),
-        center_hz_bits,
         max_dbfs_per_bin,
     });
     drop(guard);
@@ -430,8 +419,11 @@ pub fn set_gain(args: SetGainArgs, state: State<'_, AppState>) -> Result<(), Rai
         .ok_or_else(|| RailError::InvalidParameter("tuner unavailable".into()))?;
 
     tuner.set_tuner_gain_mode(!args.auto)?;
+    // The hardware call stays here — the worker holds no tuner, and the
+    // validation errors below have to reach the UI synchronously. Only
+    // the state-of-record travels the seam.
     if args.auto {
-        session.gain_tenths_db = None;
+        session.control.send(DspControl::SetGainTenthsDb(None))
     } else {
         let tenths = args
             .tenths_db
@@ -442,9 +434,10 @@ pub fn set_gain(args: SetGainArgs, state: State<'_, AppState>) -> Result<(), Rai
             )));
         }
         tuner.set_tuner_gain_tenths(tenths)?;
-        session.gain_tenths_db = Some(tenths);
+        session
+            .control
+            .send(DspControl::SetGainTenthsDb(Some(tenths)))
     }
-    Ok(())
 }
 
 #[tauri::command]
@@ -494,8 +487,9 @@ pub fn retune(args: RetuneArgs, state: State<'_, AppState>) -> Result<RetuneRepl
     let offset = lo_offset_hz(session.sample_rate_hz);
     tuner.set_center_freq(args.frequency_hz.saturating_sub(offset))?;
     let freq = tuner.center_freq().saturating_add(offset);
-    session.frequency_hz = freq;
-    session.center_hz_bits.store(freq, Ordering::Relaxed);
+    session
+        .control
+        .send(DspControl::Retune { center_hz: freq })?;
     Ok(RetuneReply { frequency_hz: freq })
 }
 
@@ -508,9 +502,9 @@ pub struct SetPpmArgs {
 
 #[tauri::command]
 pub fn set_ppm(args: SetPpmArgs, state: State<'_, AppState>) -> Result<(), RailError> {
-    let guard = state.session.lock().map_err(session_poisoned)?;
+    let mut guard = state.session.lock().map_err(session_poisoned)?;
     let session = guard
-        .as_ref()
+        .as_mut()
         .ok_or_else(|| RailError::InvalidParameter("stream not running".into()))?;
     let live = match &session.source {
         SessionSource::Live(l) => l,
@@ -525,7 +519,8 @@ pub fn set_ppm(args: SetPpmArgs, state: State<'_, AppState>) -> Result<(), RailE
         .as_ref()
         .ok_or_else(|| RailError::InvalidParameter("tuner unavailable".into()))?;
 
-    tuner.set_freq_correction_ppm(args.ppm)
+    tuner.set_freq_correction_ppm(args.ppm)?;
+    session.control.send(DspControl::SetPpm(args.ppm))
 }
 
 /// Arguments for [`set_mode`].
@@ -537,21 +532,7 @@ pub struct SetModeArgs {
 
 #[tauri::command]
 pub fn set_mode(args: SetModeArgs, state: State<'_, AppState>) -> Result<(), RailError> {
-    let mode = parse_mode(&args.mode)?;
-    {
-        let mut guard = state.session.lock().map_err(session_poisoned)?;
-        if let Some(s) = guard.as_mut() {
-            s.mode = match mode {
-                DemodMode::Fm => "FM".into(),
-                DemodMode::Nfm => "NFM".into(),
-                DemodMode::Am => "AM".into(),
-                DemodMode::Usb => "USB".into(),
-                DemodMode::Lsb => "LSB".into(),
-                DemodMode::Cw => "CW".into(),
-            };
-        }
-    }
-    send_control(&state, DemodControl::SetMode(mode))
+    send_control(&state, DspControl::SetMode(parse_mode(&args.mode)?))
 }
 
 /// Arguments for [`set_bandwidth`].
@@ -568,16 +549,7 @@ pub fn set_bandwidth(args: SetBandwidthArgs, state: State<'_, AppState>) -> Resu
             "bandwidth must be >= 1 kHz".into(),
         ));
     }
-    {
-        let mut guard = state.session.lock().map_err(session_poisoned)?;
-        if let Some(s) = guard.as_mut() {
-            s.bandwidth_hz = args.bandwidth_hz;
-        }
-    }
-    send_control(
-        &state,
-        DemodControl::SetBandwidthHz(args.bandwidth_hz as f32),
-    )
+    send_control(&state, DspControl::SetBandwidthHz(args.bandwidth_hz as f32))
 }
 
 /// Arguments for [`set_squelch`].
@@ -589,22 +561,19 @@ pub struct SetSquelchArgs {
 
 #[tauri::command]
 pub fn set_squelch(args: SetSquelchArgs, state: State<'_, AppState>) -> Result<(), RailError> {
-    let db = args
-        .threshold_dbfs
-        .filter(|v| v.is_finite())
-        .unwrap_or(f32::NEG_INFINITY);
-    send_control(&state, DemodControl::SetSquelchDbfs(db))
+    send_control(
+        &state,
+        DspControl::SetSquelchDbfs(args.threshold_dbfs.filter(|v| v.is_finite())),
+    )
 }
 
-fn send_control(state: &State<'_, AppState>, msg: DemodControl) -> Result<(), RailError> {
+/// Forward one message onto the session's control seam.
+fn send_control(state: &State<'_, AppState>, msg: DspControl) -> Result<(), RailError> {
     let guard = state.session.lock().map_err(session_poisoned)?;
     let session = guard
         .as_ref()
         .ok_or_else(|| RailError::InvalidParameter("stream not running".into()))?;
-    session
-        .control_tx
-        .send(msg)
-        .map_err(|e| RailError::StreamError(format!("demod control channel closed: {e}")))
+    session.control.send(msg)
 }
 
 /// Arguments for [`add_bookmark`].
@@ -709,7 +678,7 @@ pub async fn start_scan<R: Runtime>(
     }
 
     // Extract what the scanner task needs from the live session.
-    let (tuner, lo_offset, max_dbfs_per_bin, sample_rate_hz) = {
+    let (tuner, lo_offset, max_dbfs_per_bin, sample_rate_hz, control) = {
         let guard = state.session.lock().map_err(session_poisoned)?;
         let session = guard
             .as_ref()
@@ -732,6 +701,7 @@ pub async fn start_scan<R: Runtime>(
             lo_offset,
             session.max_dbfs_per_bin.clone(),
             sample_rate_hz,
+            session.control.clone(),
         )
     };
 
@@ -760,6 +730,7 @@ pub async fn start_scan<R: Runtime>(
         scan_channel,
         sample_rate_hz,
         args.step_hz,
+        control,
     );
 
     *state.scanner.lock().map_err(scanner_poisoned)? = Some(handle);

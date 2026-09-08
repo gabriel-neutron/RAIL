@@ -15,6 +15,7 @@ const initial = useRadioStore.getState();
 beforeEach(() => {
   useRadioStore.setState(initial, true);
   useReplayStore.setState({ active: false });
+  vi.clearAllMocks();
   // The store debounces IPC calls through setTimeout; fake timers keep those
   // from firing after the test ends.
   vi.useFakeTimers();
@@ -42,6 +43,25 @@ describe("setFrequency", () => {
     const before = useRadioStore.getState().frequencyHz;
     useRadioStore.getState().setFrequency(88_500_000);
     expect(useRadioStore.getState().frequencyHz).toBe(before);
+  });
+});
+
+describe("syncFrequencyFromBackend", () => {
+  it("updates the display without scheduling a retune", async () => {
+    const { retune } = await import("../ipc/commands");
+    useRadioStore.setState({ streaming: true });
+    useRadioStore.getState().syncFrequencyFromBackend(88_500_000.4);
+    vi.runAllTimers();
+    expect(useRadioStore.getState().frequencyHz).toBe(88_500_000);
+    expect(retune).not.toHaveBeenCalled();
+  });
+
+  it("still lets setFrequency drive a retune", async () => {
+    const { retune } = await import("../ipc/commands");
+    useRadioStore.setState({ streaming: true });
+    useRadioStore.getState().setFrequency(88_500_000);
+    vi.runAllTimers();
+    expect(retune).toHaveBeenCalledWith(88_500_000);
   });
 });
 

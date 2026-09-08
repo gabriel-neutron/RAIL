@@ -5,7 +5,6 @@
 //! in its own module so the tuning/lifecycle commands in
 //! [`super::commands`] stay short.
 
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -18,12 +17,12 @@ use tokio::sync::mpsc;
 use crate::capture::sigmf::SigMfStreamWriter;
 use crate::capture::wav::WavStreamWriter;
 use crate::dsp::classifier;
-use crate::dsp::demod::{DemodChain, DemodControl};
 use crate::dsp::input::DspInput;
 use crate::dsp::waterfall::{apply_fs4_shift, iq_u8_to_complex, FrameBuilder};
 use crate::error::RailError;
 use crate::hardware::stream::{IqCanceler, DEFAULT_USB_BUF_LEN};
 use crate::ipc::capture_cmd::{AudioStopInfo, CaptureControl, IqStopInfo};
+use crate::ipc::control::{DspControl, DspParamState, RadioParams};
 use crate::ipc::events::{SignalClassification, SignalLevel};
 use crate::perf_emit::{
     record_audio_emit_interval, record_signal_level_emit_interval, record_waterfall_emit_interval,
@@ -55,34 +54,51 @@ pub(crate) const AUDIO_CHUNK_SAMPLES: usize = 1764;
 /// sub-second cadence.
 const MIN_CLASSIFY_INTERVAL: Duration = Duration::from_millis(500);
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn spawn_dsp_task<R: Runtime>(
-    app: AppHandle<R>,
-    iq_rx: mpsc::Receiver<DspInput>,
-    waterfall_channel: Channel<InvokeResponseBody>,
-    audio_channel: Channel<InvokeResponseBody>,
-    control_rx: mpsc::UnboundedReceiver<DemodControl>,
-    capture_rx: mpsc::UnboundedReceiver<CaptureControl>,
-    canceler: Option<IqCanceler>,
-    sample_rate_hz: u32,
-    latest_dbfs_bits: Arc<AtomicU32>,
-    center_hz_bits: Arc<AtomicU32>,
-    max_dbfs_per_bin: Arc<Mutex<Vec<f32>>>,
-) -> tokio::task::JoinHandle<()> {
+/// Everything the DSP worker needs to start. Replaces the 11 positional
+/// arguments `spawn_dsp_task` used to take; both construction sites
+/// (`start_stream`, `start_replay`) fill the same struct.
+pub(crate) struct DspTaskCfg<R: Runtime> {
+    /// Handle used to emit the JSON events (signal level, classification).
+    pub(crate) app: AppHandle<R>,
+    /// Bounded IQ input from the RTL-SDR reader or the replay reader.
+    pub(crate) iq_rx: mpsc::Receiver<DspInput>,
+    /// Binary channel carrying float32 waterfall frames.
+    pub(crate) waterfall_channel: Channel<InvokeResponseBody>,
+    /// Binary channel carrying float32 mono PCM audio.
+    pub(crate) audio_channel: Channel<InvokeResponseBody>,
+    /// The one control seam (see [`crate::ipc::control`]).
+    pub(crate) control_rx: mpsc::UnboundedReceiver<DspControl>,
+    /// Cancels the reader thread when a frontend channel goes away.
+    /// `None` for replay, which stops when its reader drops `iq_tx`.
+    pub(crate) canceler: Option<IqCanceler>,
+    /// IQ sample rate in Hz.
+    pub(crate) sample_rate_hz: u32,
+    /// Parameter state the worker starts from.
+    pub(crate) initial_params: RadioParams,
+    /// Per-bin peak dBFS accumulator shared with the scanner task.
+    pub(crate) max_dbfs_per_bin: Arc<Mutex<Vec<f32>>>,
+}
+
+/// Spawn the blocking DSP worker for a session.
+pub(crate) fn spawn_dsp_task<R: Runtime>(cfg: DspTaskCfg<R>) -> tokio::task::JoinHandle<()> {
     tokio::task::spawn_blocking(move || {
-        let mut ctx = DspTaskCtx::<R>::new(
+        let DspTaskCfg {
             app,
+            iq_rx,
+            waterfall_channel,
+            audio_channel,
+            control_rx,
+            canceler,
             sample_rate_hz,
-            latest_dbfs_bits,
-            center_hz_bits,
+            initial_params,
             max_dbfs_per_bin,
-        );
+        } = cfg;
+        let mut ctx = DspTaskCtx::<R>::new(app, sample_rate_hz, initial_params, max_dbfs_per_bin);
         ctx.run(
             iq_rx,
             waterfall_channel,
             audio_channel,
             control_rx,
-            capture_rx,
             canceler,
         );
     })
@@ -91,7 +107,8 @@ pub(crate) fn spawn_dsp_task<R: Runtime>(
 struct DspTaskCtx<R: Runtime> {
     app: AppHandle<R>,
     builder: FrameBuilder,
-    chain: DemodChain,
+    /// Demod chain plus centre frequency, driven by the control seam.
+    params: DspParamState,
     /// IQ samples converted to complex, already `fs/4`-shifted.
     shifted: Vec<Complex<f32>>,
     /// Samples awaiting enough length for a full FFT frame.
@@ -113,9 +130,6 @@ struct DspTaskCtx<R: Runtime> {
     spectral_accum: Vec<f32>,
     /// Count of frames accumulated into `spectral_accum` since the last emit.
     accum_frames: u32,
-    /// Last centre frequency seen from `center_hz_bits`. When this changes,
-    /// `spectral_accum` is flushed so cross-frequency blending cannot occur.
-    last_center_hz: u32,
     peak_dbfs: f32,
     last_level_emit: Instant,
     sample_rate_hz: u32,
@@ -123,15 +137,6 @@ struct DspTaskCtx<R: Runtime> {
     audio_writer: Option<WavStreamWriter>,
     /// `Some` while an IQ recording is in progress.
     iq_writer: Option<SigMfStreamWriter>,
-    /// Latest raw-IQ RMS in dBFS (raw f32 bits). Used by `emit_signal_level`
-    /// to drive the signal meter. Computed from the fs/4-shifted IQ buffer
-    /// *before* demodulation; using raw IQ avoids the ~20–30 dB noise floor
-    /// inflation that FM/AM discriminators introduce on thermal noise.
-    latest_dbfs_bits: Arc<AtomicU32>,
-    /// Current centre frequency in Hz (plain u32, not float bits).
-    /// Updated atomically by [`retune`] so the classifier always uses
-    /// the live-tuned frequency. See `docs/TIMELINE.md` Phase 10.
-    center_hz_bits: Arc<AtomicU32>,
     /// Timestamp of the last `signal-classification` event emit.
     last_classify_emit: Instant,
     /// Last FFT spectrum snapshot retained for classification.
@@ -158,18 +163,37 @@ fn take_frame<T: Copy>(pending: &mut Vec<T>, scratch: &mut Vec<T>, n: usize) {
     scratch.extend(pending.drain(..n));
 }
 
+/// Drop every spectral sample buffered at the previous centre frequency.
+///
+/// Called when a retune actually moves the centre. All four buffers matter:
+/// `fft_pending` can hold up to `FFT_SIZE - 1` old-centre samples that would
+/// otherwise be mixed into the first post-retune frame, and `last_spectrum`
+/// is the input to the classifier, so leaving it would keep reporting the
+/// previous frequency. Extracted as a free function so the property is
+/// assertable without a Tauri runtime.
+fn flush_accumulators(
+    spectral_accum: &mut [f32],
+    accum_frames: &mut u32,
+    fft_pending: &mut Vec<Complex<f32>>,
+    last_spectrum: &mut Vec<f32>,
+) {
+    spectral_accum.fill(0.0);
+    *accum_frames = 0;
+    fft_pending.clear();
+    last_spectrum.clear();
+}
+
 impl<R: Runtime> DspTaskCtx<R> {
     fn new(
         app: AppHandle<R>,
         sample_rate_hz: u32,
-        latest_dbfs_bits: Arc<AtomicU32>,
-        center_hz_bits: Arc<AtomicU32>,
+        initial_params: RadioParams,
         max_dbfs_per_bin: Arc<Mutex<Vec<f32>>>,
     ) -> Self {
         Self {
             app,
             builder: FrameBuilder::new(FFT_SIZE),
-            chain: DemodChain::new(sample_rate_hz as f32),
+            params: DspParamState::new(sample_rate_hz as f32, initial_params),
             shifted: Vec::with_capacity(DEFAULT_USB_BUF_LEN as usize / 2),
             fft_pending: Vec::with_capacity(FFT_SIZE * 2),
             frame_buf: Vec::with_capacity(FFT_SIZE),
@@ -179,14 +203,11 @@ impl<R: Runtime> DspTaskCtx<R> {
             last_emit: Instant::now() - MIN_EMIT_INTERVAL,
             spectral_accum: vec![0.0_f32; FFT_SIZE],
             accum_frames: 0,
-            last_center_hz: center_hz_bits.load(Ordering::Relaxed),
             peak_dbfs: f32::NEG_INFINITY,
             last_level_emit: Instant::now() - MIN_LEVEL_EMIT_INTERVAL,
             sample_rate_hz,
             audio_writer: None,
             iq_writer: None,
-            latest_dbfs_bits,
-            center_hz_bits,
             last_classify_emit: Instant::now() - MIN_CLASSIFY_INTERVAL,
             last_spectrum: Vec::with_capacity(FFT_SIZE),
             max_dbfs_per_bin,
@@ -198,16 +219,14 @@ impl<R: Runtime> DspTaskCtx<R> {
         mut iq_rx: mpsc::Receiver<DspInput>,
         waterfall_channel: Channel<InvokeResponseBody>,
         audio_channel: Channel<InvokeResponseBody>,
-        mut control_rx: mpsc::UnboundedReceiver<DemodControl>,
-        mut capture_rx: mpsc::UnboundedReceiver<CaptureControl>,
+        mut control_rx: mpsc::UnboundedReceiver<DspControl>,
         canceler: Option<IqCanceler>,
     ) {
         while let Some(input) = iq_rx.blocking_recv() {
+            // The one drain point: every runtime parameter change and every
+            // capture request arrives here, in send order.
             while let Ok(msg) = control_rx.try_recv() {
-                self.chain.apply(msg);
-            }
-            while let Ok(msg) = capture_rx.try_recv() {
-                self.handle_capture(msg);
+                self.apply_control(msg);
             }
 
             // Prefill is a special short-circuit path: one FFT window
@@ -256,22 +275,15 @@ impl<R: Runtime> DspTaskCtx<R> {
                 }
             }
 
-            // Update scanner power readout from raw IQ (before demod).
-            // Raw IQ RMS is a direct measure of RF energy in the tuned
-            // bandwidth; demodulated audio RMS is ~20–30 dB higher on
-            // thermal noise due to discriminator noise shaping, causing
-            // false positives in the scanner. See docs/DSP.md §5.
-            self.latest_dbfs_bits.store(
-                compute_iq_rms_dbfs(&self.shifted).to_bits(),
-                Ordering::Relaxed,
-            );
-
             if !self.emit_waterfall_frames(&waterfall_channel, canceler.as_ref()) {
                 return;
             }
 
             let before = self.audio_pending.len();
-            let rms_dbfs = self.chain.process(&self.shifted, &mut self.audio_pending);
+            let rms_dbfs = self
+                .params
+                .chain_mut()
+                .process(&self.shifted, &mut self.audio_pending);
             if let Some(w) = self.audio_writer.as_mut() {
                 if let Err(e) = w.append(&self.audio_pending[before..]) {
                     log::warn!("audio writer failed, stopping recording: {e}");
@@ -287,6 +299,23 @@ impl<R: Runtime> DspTaskCtx<R> {
         }
 
         log::debug!("dsp task exiting: iq sender dropped");
+    }
+
+    /// Apply one control message from the seam. Deliberately free of
+    /// `self.app`: the whole control path stays Tauri-free.
+    fn apply_control(&mut self, msg: DspControl) {
+        if let DspControl::Capture(capture) = msg {
+            self.handle_capture(capture);
+            return;
+        }
+        if self.params.apply(msg).flush_spectral {
+            flush_accumulators(
+                &mut self.spectral_accum,
+                &mut self.accum_frames,
+                &mut self.fft_pending,
+                &mut self.last_spectrum,
+            );
+        }
     }
 
     fn handle_capture(&mut self, msg: CaptureControl) {
@@ -411,7 +440,7 @@ impl<R: Runtime> DspTaskCtx<R> {
         if self.last_spectrum.is_empty() {
             return;
         }
-        let center_hz = u64::from(self.center_hz_bits.load(Ordering::Relaxed));
+        let center_hz = u64::from(self.params.center_hz());
         let result = classifier::classify(
             &self.last_spectrum,
             &self.shifted,
@@ -472,15 +501,6 @@ impl<R: Runtime> DspTaskCtx<R> {
         channel: &Channel<InvokeResponseBody>,
         canceler: Option<&IqCanceler>,
     ) -> bool {
-        // Flush the accumulator when the tuned centre frequency changes so the
-        // first emitted frame after a retune contains only new-centre samples.
-        let current_center = self.center_hz_bits.load(Ordering::Relaxed);
-        if current_center != self.last_center_hz {
-            self.spectral_accum.fill(0.0);
-            self.accum_frames = 0;
-            self.last_center_hz = current_center;
-        }
-
         self.fft_pending.extend_from_slice(&self.shifted);
 
         while self.fft_pending.len() >= FFT_SIZE {
@@ -579,25 +599,6 @@ impl<R: Runtime> DspTaskCtx<R> {
     }
 }
 
-/// Compute the RMS magnitude of a block of complex IQ samples as dBFS.
-///
-/// `rms = sqrt( mean( |s[i]|² ) )`, then `20·log₁₀(rms)`.
-/// Returns `f32::NEG_INFINITY` when `samples` is empty or all-zero.
-/// Called every DSP cycle to update the scanner's power readout with a
-/// true RF-energy measure (see `latest_dbfs_bits` in [`DspTaskCtx`]).
-fn compute_iq_rms_dbfs(samples: &[Complex<f32>]) -> f32 {
-    if samples.is_empty() {
-        return f32::NEG_INFINITY;
-    }
-    let sum_sq: f32 = samples.iter().map(|s| s.norm_sqr()).sum();
-    let rms = (sum_sq / samples.len() as f32).sqrt();
-    if rms > 0.0 {
-        20.0 * rms.log10()
-    } else {
-        f32::NEG_INFINITY
-    }
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -625,6 +626,32 @@ mod tests {
             );
         }
         assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn flush_clears_pending_and_last_spectrum() {
+        // A retune must discard *every* buffered old-centre sample. Clearing
+        // only the accumulator leaves up to FFT_SIZE - 1 samples in
+        // `fft_pending` that blend into the first post-retune frame, and
+        // leaves the classifier reading the previous spectrum.
+        let mut spectral_accum = vec![1.5_f32; FFT_SIZE];
+        let mut accum_frames = 7_u32;
+        let mut fft_pending: Vec<Complex<f32>> = (0..FFT_SIZE - 1)
+            .map(|i| Complex::new(i as f32, 0.0))
+            .collect();
+        let mut last_spectrum = vec![-30.0_f32; FFT_SIZE];
+
+        flush_accumulators(
+            &mut spectral_accum,
+            &mut accum_frames,
+            &mut fft_pending,
+            &mut last_spectrum,
+        );
+
+        assert!(spectral_accum.iter().all(|&v| v == 0.0));
+        assert_eq!(accum_frames, 0);
+        assert!(fft_pending.is_empty());
+        assert!(last_spectrum.is_empty());
     }
 
     #[test]

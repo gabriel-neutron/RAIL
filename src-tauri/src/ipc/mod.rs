@@ -10,5 +10,6 @@ pub mod commands;
 pub mod events;
 
 pub(crate) mod capture_cmd;
+pub(crate) mod control;
 pub(crate) mod dsp_task;
 pub(crate) mod replay_cmd;

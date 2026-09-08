@@ -46,6 +46,16 @@ pub struct SigMfGlobal {
         skip_serializing_if = "Option::is_none"
     )]
     pub signal_type_guess: Option<String>,
+    /// Squelch threshold in dBFS at capture-start time. `None` when the
+    /// gate was disabled. Optional and defaulted so captures written
+    /// before this field existed still decode strictly (see
+    /// `crate::replay::load_info`).
+    #[serde(
+        rename = "rail:squelch_dbfs",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub squelch_dbfs: Option<f32>,
 }
 
 /// Per-capture entry inside the `captures` array.
@@ -76,6 +86,8 @@ pub struct SigMfStartParams {
     pub tuner_gain_db: f32,
     pub demod_mode: String,
     pub filter_bandwidth_hz: u32,
+    /// Squelch threshold in dBFS; `None` when the gate is disabled.
+    pub squelch_dbfs: Option<f32>,
     pub datetime_iso8601: String,
     /// Classifier label at capture-start time. Forwarded verbatim into
     /// `rail:signal_type_guess` in the finalized `.sigmf-meta`.
@@ -157,6 +169,7 @@ impl SigMfStreamWriter {
                 demod_mode: self.params.demod_mode,
                 filter_bandwidth_hz: self.params.filter_bandwidth_hz,
                 signal_type_guess: self.params.signal_type_guess.clone(),
+                squelch_dbfs: self.params.squelch_dbfs,
             },
             captures: vec![SigMfCapture {
                 sample_start: 0,
@@ -215,6 +228,7 @@ mod tests {
             tuner_gain_db: 30.0,
             demod_mode: "FM".into(),
             filter_bandwidth_hz: 200_000,
+            squelch_dbfs: Some(-55.0),
             datetime_iso8601: "2024-01-01T12:00:00Z".into(),
             signal_type_guess: Some("WBFM".into()),
         }
@@ -262,5 +276,91 @@ mod tests {
         assert_eq!(v["captures"][0]["core:datetime"], "2024-01-01T12:00:00Z");
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn squelch_round_trips_through_meta() {
+        let dir = tmp("squelch");
+        let meta_path = dir.join("clip.sigmf-meta");
+        let data_path = dir.join("clip.sigmf-data");
+
+        let w = SigMfStreamWriter::create(&meta_path, &data_path, fixture_params()).unwrap();
+        w.finalize().unwrap();
+
+        let text = std::fs::read_to_string(&meta_path).unwrap();
+        let v: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["global"]["rail:squelch_dbfs"], -55.0);
+        let meta: SigMfMeta = serde_json::from_str(&text).unwrap();
+        assert_eq!(meta.global.squelch_dbfs, Some(-55.0));
+
+        // Gate disabled: the field is omitted rather than written as a
+        // non-finite float, which serde_json cannot read back.
+        let mut off = fixture_params();
+        off.squelch_dbfs = None;
+        let w = SigMfStreamWriter::create(&meta_path, &data_path, off).unwrap();
+        w.finalize().unwrap();
+        let text = std::fs::read_to_string(&meta_path).unwrap();
+        let v: Value = serde_json::from_str(&text).unwrap();
+        assert!(v["global"].get("rail:squelch_dbfs").is_none());
+        let meta: SigMfMeta = serde_json::from_str(&text).unwrap();
+        assert_eq!(meta.global.squelch_dbfs, None);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn meta_without_squelch_field_still_decodes() {
+        // Every capture written before this field existed — including
+        // docs/assets/demo_iq.sigmf-meta — must still take the strict
+        // `from_value::<SigMfMeta>` path in `crate::replay::load_info`,
+        // not the loose fallback.
+        let raw = serde_json::json!({
+            "global": {
+                "core:datatype": "cf32_le",
+                "core:sample_rate": 2_048_000,
+                "core:version": "1.0.0",
+                "core:description": "RAIL IQ capture",
+                "core:author": "RAIL",
+                "rail:center_frequency_hz": 100_000_000,
+                "rail:tuner_gain_db": 30.0,
+                "rail:demod_mode": "FM",
+                "rail:filter_bandwidth_hz": 200_000
+            },
+            "captures": [{
+                "core:sample_start": 0,
+                "core:datetime": "2024-01-01T12:00:00Z",
+                "core:frequency": 100_000_000
+            }],
+            "annotations": []
+        });
+        let meta: SigMfMeta = serde_json::from_value(raw).unwrap();
+        assert_eq!(meta.global.squelch_dbfs, None);
+        assert_eq!(meta.global.center_frequency_hz, 100_000_000);
+    }
+
+    #[test]
+    fn missing_squelch_is_not_what_blocks_the_shipped_demo_capture() {
+        // The shipped demo already fails the strict decode, but for an
+        // unrelated pre-existing reason: `rail:tuner_gain_db` is a bare f32
+        // and AGC captures write it as `null`. Patch only that field and the
+        // strict path accepts the file with no `rail:squelch_dbfs` present —
+        // so the new field costs no back-compatibility.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("docs")
+            .join("assets")
+            .join("demo_iq.sigmf-meta");
+        if !path.exists() {
+            return;
+        }
+        let text = std::fs::read_to_string(&path).unwrap();
+        let mut raw: Value = serde_json::from_str(&text).unwrap();
+        assert!(raw["global"].get("rail:squelch_dbfs").is_none());
+        assert!(raw["global"]["rail:tuner_gain_db"].is_null());
+
+        raw["global"]["rail:tuner_gain_db"] = serde_json::json!(30.0);
+        let meta: SigMfMeta = serde_json::from_value(raw).unwrap();
+        assert_eq!(meta.global.squelch_dbfs, None);
+        assert_eq!(meta.global.center_frequency_hz, 101_583_820);
     }
 }

@@ -17,6 +17,7 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Runtime};
 
 use crate::hardware::Tuner;
+use crate::ipc::control::{DspControl, DspControlHandle};
 use crate::ipc::events::{ScanComplete, ScanStep, ScanStopped};
 
 /// Arguments for [`start_scan`](crate::ipc::commands::start_scan).
@@ -152,6 +153,9 @@ pub(crate) enum ScanEvent {
 ///   dwell end.
 /// * `sample_rate_hz` — SDR sample rate, used to derive FFT bin width.
 /// * `step_hz` — frequency step, used to derive the channel measurement window.
+/// * `control` — the DSP control seam. Every step sends
+///   [`DspControl::Retune`] so the worker flushes its spectral accumulator
+///   and relabels the classifier and capture metadata.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_scanner<R: Runtime, T: Tuner + Send + 'static>(
     app: AppHandle<R>,
@@ -164,15 +168,23 @@ pub(crate) fn spawn_scanner<R: Runtime, T: Tuner + Send + 'static>(
     scan_channel: Channel<InvokeResponseBody>,
     sample_rate_hz: u32,
     step_hz: u32,
+    control: DspControlHandle,
 ) -> ScannerHandle {
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel_task = cancel.clone();
     let handle = tokio::spawn(async move {
         let emit = move |event: ScanEvent| match event {
-            // Notify the frontend so all display components (FrequencyAxis,
-            // FilterBandMarker, FrequencyControl) stay in sync via the radio
-            // store.
+            // Tell the DSP worker the centre moved (it flushes its spectral
+            // accumulator and relabels the classifier and capture metadata),
+            // then notify the frontend so all display components
+            // (FrequencyAxis, FilterBandMarker, FrequencyControl) stay in
+            // sync via the radio store.
             ScanEvent::Tuned { frequency_hz } => {
+                if let Some(msg) = control_for_scan_event(&event) {
+                    if let Err(e) = control.send(msg) {
+                        log::warn!("scanner: control send failed: {e}");
+                    }
+                }
                 if let Err(e) = (ScanStep { frequency_hz }).emit(&app) {
                     log::warn!("scanner: scan-step emit failed: {e}");
                 }
@@ -218,10 +230,30 @@ const POLL_INTERVAL: Duration = Duration::from_millis(20);
 /// pollute the measurement (docs/HARDWARE.md §2 — settle time).
 const SETTLE_MS: Duration = Duration::from_millis(40);
 
+/// Map a sweep event onto the DSP control message it implies, if any.
+/// Only a retune concerns the worker; measurement and completion events
+/// are frontend-facing. Pure so the mapping is testable on its own.
+fn control_for_scan_event(event: &ScanEvent) -> Option<DspControl> {
+    match *event {
+        ScanEvent::Tuned { frequency_hz } => Some(DspControl::Retune {
+            center_hz: frequency_hz,
+        }),
+        _ => None,
+    }
+}
+
 /// Run one sweep, reporting progress through `emit`.
 ///
 /// Free of Tauri types on purpose: the sink is a plain closure, so the sweep
 /// sequencing is testable against a fake [`Tuner`] with no dongle attached.
+///
+/// Timing note: `ScanEvent::Tuned` is emitted the instant the tuner accepts
+/// the new frequency, but the worker drains the resulting `Retune` behind up
+/// to `IQ_CHANNEL_CAPACITY` queued IQ chunks plus the USB buffers in flight —
+/// roughly 60–100 ms of already-captured old-centre samples. Message order is
+/// not sample order. Measurement is unaffected (the accumulator is reset here
+/// after `SETTLE_MS`); what the message buys is correct-per-step classifier
+/// and capture metadata instead of stale-for-the-whole-sweep.
 #[allow(clippy::too_many_arguments)]
 async fn run_scanner<T: Tuner, F: FnMut(ScanEvent) + Send>(
     tuner: T,
@@ -323,7 +355,10 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
 
-    use super::{build_frequency_list, compute_channel_snr, run_scanner, ScanEvent};
+    use super::{
+        build_frequency_list, compute_channel_snr, control_for_scan_event, run_scanner, DspControl,
+        ScanEvent,
+    };
     use crate::hardware::fake_tuner::FakeTuner;
 
     const FS_HZ: u32 = 2_048_000;
@@ -354,8 +389,7 @@ mod tests {
                     guard.iter_mut().for_each(|v| *v = NOISE_DB);
                     if signal {
                         let center = n / 2;
-                        let half =
-                            ((STEP_HZ as f32 / 2.0) / (FS_HZ as f32 / n as f32)) as usize;
+                        let half = ((STEP_HZ as f32 / 2.0) / (FS_HZ as f32 / n as f32)) as usize;
                         for v in &mut guard[(center - half)..=(center + half)] {
                             *v = SIGNAL_DB;
                         }
@@ -364,6 +398,35 @@ mod tests {
                 tokio::time::sleep(std::time::Duration::from_millis(5)).await;
             }
         });
+    }
+
+    #[test]
+    fn tuned_event_maps_to_retune_control() {
+        // Composed with `sweep_tunes_every_frequency_at_lo_offset` (which
+        // already asserts one Tuned per frequency), this covers "the scanner
+        // sends Retune on every step" without threading a channel through
+        // the Tauri-free sweep.
+        let msg = control_for_scan_event(&ScanEvent::Tuned {
+            frequency_hz: 433_920_000,
+        });
+        assert!(matches!(
+            msg,
+            Some(DspControl::Retune {
+                center_hz: 433_920_000
+            })
+        ));
+
+        // Nothing else concerns the worker.
+        assert!(control_for_scan_event(&ScanEvent::Measured {
+            signal_avg_db: -10.0,
+            noise_floor_db: -50.0,
+        })
+        .is_none());
+        assert!(control_for_scan_event(&ScanEvent::Stopped {
+            frequency_hz: 433_920_000,
+        })
+        .is_none());
+        assert!(control_for_scan_event(&ScanEvent::Complete).is_none());
     }
 
     fn measured_count(events: &[ScanEvent]) -> usize {
@@ -559,7 +622,9 @@ mod tests {
             "cancellation must be observed before the next retune"
         );
         assert!(!events.contains(&ScanEvent::Complete));
-        assert!(!events.iter().any(|e| matches!(e, ScanEvent::Stopped { .. })));
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, ScanEvent::Stopped { .. })));
     }
 
     #[test]

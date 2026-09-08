@@ -57,6 +57,10 @@ export type RadioState = {
   /// is above the noise floor or no stream is running.
   classification: SignalClassificationPayload | null;
   setFrequency: (hz: number) => void;
+  /// Mirror a frequency the backend has already tuned to. Updates the
+  /// display only — no retune is scheduled, because the hardware is
+  /// already there.
+  syncFrequencyFromBackend: (hz: number) => void;
   setSampleRate: (hz: number) => void;
   setMode: (mode: DemodMode) => void;
   setBandwidth: (hz: number) => void;
@@ -178,6 +182,8 @@ export const useRadioStore = create<RadioState>((set, get) => ({
     set({ frequencyHz: hz });
     scheduleRetune(hz, get().streaming);
   },
+  syncFrequencyFromBackend: (frequencyHz) =>
+    set({ frequencyHz: Math.max(0, Math.round(frequencyHz)) }),
   setSampleRate: (sampleRateHz) => set({ sampleRateHz }),
   setMode: (mode) => {
     const prev = get().mode;

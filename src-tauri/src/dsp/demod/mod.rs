@@ -158,6 +158,11 @@ impl DemodChain {
         self.audio_rate_hz
     }
 
+    /// Current chain configuration (mode, bandwidth, squelch).
+    pub fn config(&self) -> DemodConfig {
+        self.config
+    }
+
     /// Apply a runtime control message. No-op if the message doesn't
     /// change state.
     pub fn apply(&mut self, msg: DemodControl) {

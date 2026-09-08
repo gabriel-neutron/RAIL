@@ -9,18 +9,17 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Runtime, State};
 use tokio::sync::mpsc;
 
-use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
 
-use crate::dsp::demod::{DemodControl, AUDIO_RATE_HZ};
+use crate::dsp::demod::{DemodMode, AUDIO_RATE_HZ};
 use crate::dsp::input::DspInput;
 use crate::error::RailError;
 use crate::hardware::stream::IQ_CHANNEL_CAPACITY;
-use crate::ipc::capture_cmd::CaptureControl;
 use crate::ipc::commands::{
-    session_poisoned, stop_stream, AppState, ReplayBits, Session, SessionSource,
+    parse_mode, session_poisoned, stop_stream, AppState, ReplayBits, Session, SessionSource,
 };
-use crate::ipc::dsp_task::{spawn_dsp_task, AUDIO_CHUNK_SAMPLES, FFT_SIZE};
+use crate::ipc::control::{DspControlHandle, RadioParams};
+use crate::ipc::dsp_task::{spawn_dsp_task, DspTaskCfg, AUDIO_CHUNK_SAMPLES, FFT_SIZE};
 use crate::ipc::events::DeviceStatus;
 use crate::replay::{spawn_replay_reader, ReplayControl, ReplayInfo};
 
@@ -123,8 +122,16 @@ pub async fn start_replay<R: Runtime>(
     };
 
     let (iq_tx, iq_rx) = mpsc::channel::<DspInput>(IQ_CHANNEL_CAPACITY);
-    let (control_tx, control_rx) = mpsc::unbounded_channel::<DemodControl>();
-    let (capture_tx, capture_rx) = mpsc::unbounded_channel::<CaptureControl>();
+    // Seed the seam from the file: the SigMF metadata is the only source
+    // of truth for a replay session's frequency, mode and bandwidth.
+    let (control, control_rx) = DspControlHandle::new(RadioParams {
+        center_hz: frequency_hz,
+        mode: parse_mode(&mode).unwrap_or(DemodMode::Fm),
+        bandwidth_hz,
+        squelch_dbfs: None,
+        gain_tenths_db: None,
+        ppm: 0,
+    });
     let (replay_ctl_tx, replay_ctl_rx) = mpsc::unbounded_channel::<ReplayControl>();
 
     // No hardware reader to cancel — the DSP task exits cleanly when
@@ -132,22 +139,18 @@ pub async fn start_replay<R: Runtime>(
     // `ReplayControl::Stop` to break out of the pacing loop.
     // Replay sessions do not support scanning, so the per-bin accumulator
     // is a throwaway that nothing will read.
-    let replay_dbfs_bits = Arc::new(AtomicU32::new(f32::NEG_INFINITY.to_bits()));
-    let replay_center_hz_bits = Arc::new(AtomicU32::new(frequency_hz));
     let replay_max_dbfs_per_bin = Arc::new(Mutex::new(Vec::new()));
-    let dsp_handle = spawn_dsp_task(
-        app.clone(),
+    let dsp_handle = spawn_dsp_task(DspTaskCfg {
+        app: app.clone(),
         iq_rx,
         waterfall_channel,
         audio_channel,
         control_rx,
-        capture_rx,
-        None,
-        sample_rate,
-        replay_dbfs_bits.clone(),
-        replay_center_hz_bits.clone(),
-        replay_max_dbfs_per_bin.clone(),
-    );
+        canceler: None,
+        sample_rate_hz: sample_rate,
+        initial_params: control.snapshot()?,
+        max_dbfs_per_bin: replay_max_dbfs_per_bin.clone(),
+    });
 
     let reader_handle = spawn_replay_reader(app.clone(), info.clone(), iq_tx, replay_ctl_rx);
 
@@ -155,18 +158,12 @@ pub async fn start_replay<R: Runtime>(
     *guard = Some(Session {
         dsp: Some(dsp_handle),
         sample_rate_hz: sample_rate,
-        control_tx,
-        capture_tx,
-        frequency_hz,
-        mode,
-        bandwidth_hz,
-        gain_tenths_db: None,
+        control,
         source: SessionSource::Replay(ReplayBits {
             reader: Some(reader_handle),
             control_tx: replay_ctl_tx,
             info: info.clone(),
         }),
-        center_hz_bits: replay_center_hz_bits,
         max_dbfs_per_bin: replay_max_dbfs_per_bin,
     });
     drop(guard);

@@ -11,13 +11,14 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::{AppHandle, Runtime, State};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 
 use crate::capture::sigmf::SigMfStartParams;
 use crate::capture::tmp::{move_file, new_tmp_path};
 use crate::dsp::demod::AUDIO_RATE_HZ;
 use crate::error::RailError;
 use crate::ipc::commands::{session_poisoned, AppState};
+use crate::ipc::control::{DspControl, DspControlHandle};
 
 /// Requests from Tauri commands to the DSP worker that interact with
 /// capture writers. Replies ride on a `oneshot` so commands remain
@@ -65,11 +66,16 @@ pub(crate) struct IqStopInfo {
     pub sample_rate_hz: u32,
 }
 
+/// The radio parameters a capture records. Read from the control seam's
+/// state-of-record, never queried from the worker — a paused replay or a
+/// disconnected dongle stops the worker draining, and a capture command
+/// must not wedge on that.
 struct RadioSnapshot {
     frequency_hz: u64,
     mode: String,
     bandwidth_hz: u32,
     gain_tenths_db: Option<i32>,
+    squelch_dbfs: Option<f32>,
     sample_rate_hz: u32,
 }
 
@@ -78,23 +84,23 @@ fn radio_snapshot(state: &State<'_, AppState>) -> Result<RadioSnapshot, RailErro
     let s = guard
         .as_ref()
         .ok_or_else(|| RailError::InvalidParameter("stream not running".into()))?;
+    let params = s.control.snapshot()?;
     Ok(RadioSnapshot {
-        frequency_hz: s.frequency_hz as u64,
-        mode: s.mode.clone(),
-        bandwidth_hz: s.bandwidth_hz,
-        gain_tenths_db: s.gain_tenths_db,
+        frequency_hz: u64::from(params.center_hz),
+        mode: params.mode_str().to_string(),
+        bandwidth_hz: params.bandwidth_hz,
+        gain_tenths_db: params.gain_tenths_db,
+        squelch_dbfs: params.squelch_dbfs,
         sample_rate_hz: s.sample_rate_hz,
     })
 }
 
-fn capture_sender(
-    state: &State<'_, AppState>,
-) -> Result<mpsc::UnboundedSender<CaptureControl>, RailError> {
+fn capture_sender(state: &State<'_, AppState>) -> Result<DspControlHandle, RailError> {
     let guard = state.session.lock().map_err(session_poisoned)?;
     let s = guard
         .as_ref()
         .ok_or_else(|| RailError::InvalidParameter("stream not running".into()))?;
-    Ok(s.capture_tx.clone())
+    Ok(s.control.clone())
 }
 
 /// ISO 8601 UTC "YYYYMMDDTHHMMSSZ" — no separators so it's safe in
@@ -160,12 +166,11 @@ pub async fn start_audio_capture<R: Runtime>(
     let temp = new_tmp_path(&app, "wav")?;
     let tx = capture_sender(&state)?;
     let (reply_tx, reply_rx) = oneshot::channel();
-    tx.send(CaptureControl::StartAudio {
+    tx.send(DspControl::Capture(CaptureControl::StartAudio {
         path: temp.clone(),
         sample_rate_hz: AUDIO_RATE_HZ as u32,
         reply: reply_tx,
-    })
-    .map_err(|e| RailError::StreamError(format!("capture channel closed: {e}")))?;
+    }))?;
     reply_rx
         .await
         .map_err(|e| RailError::StreamError(format!("capture reply dropped: {e}")))??;
@@ -195,8 +200,9 @@ pub async fn stop_audio_capture(
     let radio = radio_snapshot(&state)?;
     let tx = capture_sender(&state)?;
     let (reply_tx, reply_rx) = oneshot::channel();
-    tx.send(CaptureControl::StopAudio { reply: reply_tx })
-        .map_err(|e| RailError::StreamError(format!("capture channel closed: {e}")))?;
+    tx.send(DspControl::Capture(CaptureControl::StopAudio {
+        reply: reply_tx,
+    }))?;
     let info = reply_rx
         .await
         .map_err(|e| RailError::StreamError(format!("capture reply dropped: {e}")))??;
@@ -247,16 +253,16 @@ pub async fn start_iq_capture<R: Runtime>(
             .unwrap_or(f32::NAN),
         demod_mode: radio.mode.clone(),
         filter_bandwidth_hz: radio.bandwidth_hz,
+        squelch_dbfs: radio.squelch_dbfs,
         datetime_iso8601: iso8601_compact(now_secs()?),
         signal_type_guess,
     };
-    tx.send(CaptureControl::StartIq {
+    tx.send(DspControl::Capture(CaptureControl::StartIq {
         meta_path: meta_temp.clone(),
         data_path: data_temp.clone(),
         params,
         reply: reply_tx,
-    })
-    .map_err(|e| RailError::StreamError(format!("capture channel closed: {e}")))?;
+    }))?;
     reply_rx
         .await
         .map_err(|e| RailError::StreamError(format!("capture reply dropped: {e}")))??;
@@ -285,8 +291,9 @@ pub async fn stop_iq_capture(state: State<'_, AppState>) -> Result<StopIqCapture
     let radio = radio_snapshot(&state)?;
     let tx = capture_sender(&state)?;
     let (reply_tx, reply_rx) = oneshot::channel();
-    tx.send(CaptureControl::StopIq { reply: reply_tx })
-        .map_err(|e| RailError::StreamError(format!("capture channel closed: {e}")))?;
+    tx.send(DspControl::Capture(CaptureControl::StopIq {
+        reply: reply_tx,
+    }))?;
     let info = reply_rx
         .await
         .map_err(|e| RailError::StreamError(format!("capture reply dropped: {e}")))??;

@@ -87,12 +87,14 @@ export const Scanner = () => {
     let unlistenStopped: (() => void) | undefined;
     let cancelled = false;
 
-    // Keep the radio store in sync with every hardware retune the scanner
-    // performs. FrequencyAxis, FilterBandMarker, and FrequencyControl all
-    // read from that store, so they update automatically without any
-    // direct coupling to the scanner.
+    // Mirror every hardware retune the scanner performs into the radio
+    // store for display only. FrequencyAxis, FilterBandMarker, and
+    // FrequencyControl read from that store. Going through setFrequency
+    // would schedule a second retune of a frequency the scanner has
+    // already tuned, landing inside its settle window and re-locking the
+    // PLL under the measurement it is taking.
     void subscribeScanStep((payload) => {
-      useRadioStore.getState().setFrequency(payload.frequencyHz);
+      useRadioStore.getState().syncFrequencyFromBackend(payload.frequencyHz);
     }).then((fn) => {
       if (cancelled) fn();
       else unlistenStep = fn;
