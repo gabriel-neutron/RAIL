@@ -4,11 +4,11 @@
  * is what makes it win, so keep that import order in App.tsx.
  *
  * Rationale
- * - Palette is ONE hue. Amber phosphor, with every step that carries text at
- *   4.5:1 or better on the panel ground (#0d0903):
+ * - Palette is ONE hue. Amber phosphor, measured on the panel ground (#0d0903)
+ *   and listed in ascending contrast:
  *     burn  #2a1c06  fills only, never text or a border   (1.2:1)
- *     faint #785011  decorative glyphs, disabled, hairline dividers (2.8:1)
  *     rule  #5e4110  panel borders                        (2.1:1)
+ *     faint #785011  decorative glyphs and disabled only  (2.8:1)
  *     dim   #a36d18  secondary labels                     (4.5:1  AA)
  *     mid   #d99b2e  body and navigation                  (8.2:1)
  *     bright #ffb229 live values                         (11.0:1)
@@ -18,10 +18,15 @@
  *   luminance step. "Alarm" is inverse video plus a blink, never red.
  * - burn does fills, faint does marks, rule does edges. Keeping those three
  *   apart is what stops a contrast fix in one from wrecking the others.
+ * - faint is BELOW AA by design, so it may only carry ::before/::after glyphs
+ *   and :disabled controls (WCAG 1.4.3 exempts inactive components). Anything
+ *   a user has to read — a label, a unit, an empty-state message, an enabled
+ *   control — starts at dim. Grep for `color: var(--ph-faint)` before adding
+ *   one: every current use is a pseudo-element or a :disabled state.
  * - Type is monospace only: IBM Plex Mono for every character in the app,
  *   VT323 for the masthead. Labels are uppercase keys with a trailing colon
  *   ("FREQ:"), buttons wear literal square brackets drawn as pseudo-glyphs.
- * - Grid: 4px base, 12px/1.3 text with a 10px floor for labels, panels are
+ * - Grid: 4px base, 13px/1.3 text with an 11px floor for labels, panels are
  *   hairline rules with box-drawing corner glyphs. Every radius is 0.
  *   Uppercase tracking stays at or under 0.12em (the 26px masthead excepted):
  *   past that, word shapes dissolve and uppercase is read letter by letter.
@@ -30,7 +35,7 @@
  *   areas or small type.
  * - The CRT overlay is texture, not content: a 1px scanline at 0.16 alpha every
  *   4px (a true half-pixel at 2dppx). Heavy enough to read as a tube, light
- *   enough that 10px glyphs survive it.
+ *   enough that 11px glyphs survive it.
  * - Rejects: rounded corners, drop shadows, gradients-as-decoration, the
  *   slate-blue #3aa0ff accent, mixed font families, and whitespace as luxury.
  */
@@ -89,7 +94,7 @@
   --ph-mono: "IBM Plex Mono", "Consolas", ui-monospace, monospace;
 
   font-family: var(--ph-mono);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ph-mid);
   background-color: var(--ph-void);
 }
@@ -107,7 +112,7 @@ body,
   padding: 10px 12px 8px;
   gap: 6px;
   font-family: var(--ph-mono);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.3;
   color: var(--ph-mid);
   background:
@@ -205,7 +210,7 @@ body,
 
 .app-status {
   gap: 12px;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--ph-dim);
   text-transform: uppercase;
   letter-spacing: 0.12em;
@@ -213,7 +218,7 @@ body,
 
 .app-status code {
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   color: var(--ph-bright);
   background: transparent;
   border: 1px solid var(--ph-faint);
@@ -230,7 +235,7 @@ body,
   border-radius: 0;
   background: transparent;
   border: 1px solid var(--ph-rule);
-  font-size: 10px;
+  font-size: 11px;
   color: var(--ph-mid);
 }
 
@@ -276,7 +281,7 @@ body,
 
 .status-pill-label {
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   color: var(--ph-mid);
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -286,7 +291,7 @@ body,
   margin-left: 2px;
   padding: 5px 8px;
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   color: var(--ph-dim);
   background: transparent;
   border: none;
@@ -340,7 +345,7 @@ body,
   position: absolute;
   top: -7px;
   left: -1px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1;
   color: var(--ph-dim);
   pointer-events: none;
@@ -354,7 +359,7 @@ body,
   position: absolute;
   bottom: -8px;
   right: -1px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1;
   color: var(--ph-dim);
   pointer-events: none;
@@ -382,7 +387,7 @@ body,
 .scanner-label,
 .wf-range-label {
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -447,7 +452,7 @@ body,
 
 .unit-btn {
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--ph-dim);
@@ -480,7 +485,7 @@ body,
   border-radius: 0;
   color: var(--ph-mid);
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.04em;
   padding: 6px 9px;
 }
@@ -505,7 +510,7 @@ body,
   border-radius: 0;
   color: var(--ph-bright);
   font-family: var(--ph-mono);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   padding: 6px 9px;
 }
@@ -528,7 +533,7 @@ body,
 .ppm-control-error,
 .menu-error {
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #0a0702;
@@ -569,7 +574,7 @@ body,
 
 .menu-top {
   font-family: var(--ph-mono);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -606,7 +611,7 @@ body,
 
 .menu-item {
   font-family: var(--ph-mono);
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.04em;
   color: var(--ph-mid);
   padding: 6px 10px;
@@ -635,7 +640,7 @@ body,
 }
 
 .menu-section-label {
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.12em;
   color: var(--ph-dim);
   padding: 2px 8px 1px;
@@ -649,8 +654,8 @@ body,
 .menu-empty {
   font-family: var(--ph-mono);
   font-style: normal;
-  font-size: 10px;
-  color: var(--ph-faint);
+  font-size: 11px;
+  color: var(--ph-dim);
   letter-spacing: 0.08em;
   padding: 2px 8px 4px;
 }
@@ -674,7 +679,7 @@ body,
 
 .menu-bookmark-tune {
   font-family: var(--ph-mono);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ph-mid);
   padding: 2px 8px;
 }
@@ -696,14 +701,14 @@ body,
 .menu-bookmark-freq,
 .menu-item-freq {
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
   color: var(--ph-dim);
 }
 
 .menu-bookmark-delete {
-  color: var(--ph-faint);
-  font-size: 12px;
+  color: var(--ph-dim);
+  font-size: 13px;
   padding: 0 7px;
 }
 
@@ -752,7 +757,7 @@ body,
 .mode-btn,
 .filter-btn {
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -835,7 +840,7 @@ body,
 
 .mode-suggested-badge {
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   padding: 1px 5px;
@@ -926,7 +931,7 @@ body,
 
 .hover-slider-value {
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ph-dim);
@@ -949,7 +954,7 @@ body,
 
 .waterfall-status {
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--ph-dim);
@@ -981,6 +986,7 @@ body,
   gap: 6px;
 }
 
+/* Renders a literal "|" divider, so faint is decoration, not content. */
 .wf-range-sep {
   color: var(--ph-faint);
   margin: 0;
@@ -988,7 +994,7 @@ body,
 
 .wf-range-value {
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   color: var(--ph-bright);
   font-variant-numeric: tabular-nums;
   min-width: 3.6ch;
@@ -1073,7 +1079,7 @@ body,
 .band-guide-toggle {
   min-height: 24px;
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--ph-dim);
@@ -1095,7 +1101,7 @@ body,
 
 .band-guide-pill {
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   border: 1px solid var(--ph-faint);
@@ -1144,7 +1150,7 @@ body,
 
 .signal-meter-header {
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -1166,7 +1172,7 @@ body,
 .signal-meter-ticks {
   width: 26px;
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.04em;
   color: var(--ph-dim);
 }
@@ -1223,7 +1229,7 @@ body,
 
 .signal-meter-current {
   color: var(--ph-bloom);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   letter-spacing: 0.04em;
   text-shadow: 0 0 9px rgba(255, 178, 41, 0.5);
@@ -1231,7 +1237,7 @@ body,
 
 .signal-meter-peak-text {
   color: var(--ph-dim);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -1247,7 +1253,7 @@ body,
 .transport-btn {
   padding: 6px 10px;
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--ph-mid);
@@ -1282,7 +1288,7 @@ body,
 
 .transport-time {
   font-family: var(--ph-mono);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ph-bloom);
   letter-spacing: 0.08em;
   min-width: 76px;
@@ -1290,7 +1296,7 @@ body,
 
 .transport-meta {
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--ph-dim);
@@ -1318,7 +1324,7 @@ body,
 
 .scanner-header {
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -1348,10 +1354,10 @@ body,
 
 .scanner-unit {
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--ph-faint);
+  color: var(--ph-dim);
 }
 
 .scanner-separator {
@@ -1369,7 +1375,7 @@ body,
   border-radius: 0;
   border: 1px solid var(--ph-faint);
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -1432,7 +1438,7 @@ body,
 .scanner-status {
   font-family: var(--ph-mono);
   font-style: normal;
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--ph-mid);
@@ -1452,7 +1458,7 @@ body,
   border-radius: 0;
   color: var(--ph-dim);
   font-family: var(--ph-mono);
-  font-size: 12px;
+  font-size: 13px;
   width: 18px;
   min-height: 24px;
   transition: none;
@@ -1472,7 +1478,7 @@ body,
 
 .scanner-nav-label {
   font-family: var(--ph-mono);
-  font-size: 10px;
+  font-size: 11px;
   color: var(--ph-bright);
   font-variant-numeric: tabular-nums;
 }
