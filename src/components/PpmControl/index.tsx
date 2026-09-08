@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { useRadioStore } from "../../store/radio";
 import { useReplayStore } from "../../store/replay";
@@ -11,10 +11,6 @@ export const PpmControl = () => {
 
   const [draft, setDraft] = useState<string>(String(ppm));
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setDraft(String(ppm));
-  }, [ppm]);
 
   const apply = async (raw: string) => {
     const parsed = Number.parseInt(raw, 10);

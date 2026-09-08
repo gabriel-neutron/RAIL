@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useState } from "react";
 
 import { useRadioStore } from "../../store/radio";
 import { useReplayStore } from "../../store/replay";
@@ -138,10 +138,12 @@ export const AudioControls = () => {
   // Remember the last "on" squelch threshold so toggling off → on
   // restores the user's previous pick instead of snapping to the
   // default.
-  const lastSquelchRef = useRef<number>(squelchDbfs ?? SQUELCH_DEFAULT_DBFS);
-  useEffect(() => {
-    if (squelchDbfs !== null) lastSquelchRef.current = squelchDbfs;
-  }, [squelchDbfs]);
+  const [lastSquelch, setLastSquelch] = useState<number>(
+    squelchDbfs ?? SQUELCH_DEFAULT_DBFS,
+  );
+  if (squelchDbfs !== null && squelchDbfs !== lastSquelch) {
+    setLastSquelch(squelchDbfs);
+  }
 
   // --- Volume ---------------------------------------------------------
   const volumePct = Math.round(volume * 100);
@@ -169,10 +171,10 @@ export const AudioControls = () => {
 
   // --- Squelch --------------------------------------------------------
   const squelchEnabled = squelchDbfs !== null;
-  const squelchValue = squelchDbfs ?? lastSquelchRef.current;
+  const squelchValue = squelchDbfs ?? lastSquelch;
 
   const toggleSquelch = () => {
-    setSquelchDbfs(squelchEnabled ? null : lastSquelchRef.current);
+    setSquelchDbfs(squelchEnabled ? null : lastSquelch);
   };
 
   // --- Gain -----------------------------------------------------------

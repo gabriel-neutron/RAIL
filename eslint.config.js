@@ -39,12 +39,11 @@ export default tseslint.config(
     rules: {
       ...reactHooks.configs.recommended.rules,
 
-      // React Compiler ergonomics rules. 7 pre-existing violations across
-      // AudioControls / Transport / FrequencyControl / PpmControl / Scanner —
-      // each needs a real component refactor, so they warn rather than block.
-      // Tracked in #11: fix those, then raise both to 'error'.
-      'react-hooks/refs': 'warn',
-      'react-hooks/set-state-in-effect': 'warn',
+      // React Compiler ergonomics rules. Both flag real correctness hazards
+      // (stale reads from a ref written during render, cascading renders from
+      // a store-to-draft mirror effect), not style.
+      'react-hooks/refs': 'error',
+      'react-hooks/set-state-in-effect': 'error',
       // typescript-eslint's equivalents handle these; the core rules produce
       // false positives on TS (types, ambient DOM globals, enums).
       'no-undef': 'off',

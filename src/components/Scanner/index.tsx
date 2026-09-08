@@ -41,14 +41,15 @@ export const Scanner = () => {
   // When a band-menu click pushes new config, sync the form fields.
   // scanConfigSeq changes only on external setScanConfig calls, not on
   // user edits, so this never fights with in-progress typing.
-  useEffect(() => {
+  const [prevScanConfigSeq, setPrevScanConfigSeq] = useState(scanConfigSeq);
+  if (scanConfigSeq !== prevScanConfigSeq) {
+    setPrevScanConfigSeq(scanConfigSeq);
     setStartMhz((scanConfig.startHz / 1e6).toFixed(1));
     setStopMhz((scanConfig.stopHz / 1e6).toFixed(1));
     setStepKhz(String(Math.round(scanConfig.stepHz / 1e3)));
     setDwellMs(String(scanConfig.dwellMs));
     setThresholdSnrDb(String(scanConfig.thresholdSnrDb));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanConfigSeq]);
+  }
 
   // Ref so event callbacks always see the current threshold (SNR dB).
   const thresholdRef = useRef(scanConfig.thresholdSnrDb);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { UNIT_SCALE, useRadioStore, type FreqUnit } from "../../store/radio";
 import { useReplayStore } from "../../store/replay";
@@ -40,11 +40,11 @@ export const FrequencyControl = () => {
     [frequencyHz, unit],
   );
 
-  useEffect(() => {
-    if (!focused) {
-      setDraft(canonical);
-    }
-  }, [canonical, focused]);
+  const [prevSync, setPrevSync] = useState({ canonical, focused });
+  if (prevSync.canonical !== canonical || prevSync.focused !== focused) {
+    setPrevSync({ canonical, focused });
+    if (!focused) setDraft(canonical);
+  }
 
   const commitDraft = (raw: string) => {
     const parsed = Number.parseFloat(raw.replace(",", "."));

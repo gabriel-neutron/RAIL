@@ -12,7 +12,7 @@ const HEIGHT_PX = 16;
 const BAR_FILL_ALPHA = "8c"; // 55 % opacity in hex
 const BAR_EDGE_ALPHA = "d9"; // 85 % opacity in hex
 
-export const CATEGORY_COLORS: Record<BandCategory, string> = {
+const CATEGORY_COLORS: Record<BandCategory, string> = {
   broadcast: "#3a8ef0",
   aviation:  "#e8a020",
   maritime:  "#20b8c8",
