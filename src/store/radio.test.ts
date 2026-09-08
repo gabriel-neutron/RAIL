@@ -103,7 +103,11 @@ describe("setVolume", () => {
 describe("setClassifierEnabled", () => {
   it("drops any stale classification when disabled", () => {
     useRadioStore.setState({
-      classification: { kind: "confirmed" } as never,
+      classification: {
+        confirmed: "NFM",
+        candidates: ["NFM", "AM"],
+        reason: "bw 12.5 kHz, env var 0.31",
+      },
       classifierEnabled: true,
     });
     useRadioStore.getState().setClassifierEnabled(false);
