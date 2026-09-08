@@ -29,6 +29,8 @@ import { useRadioStore } from "./store/radio";
 import { useReplayStore } from "./store/replay";
 import { useScannerStore } from "./store/scanner";
 import "./App.css";
+// Skin, loaded after App.css so its values win. See theme.css header.
+import "./theme.css";
 
 type DeviceState =
   | { status: "idle" }

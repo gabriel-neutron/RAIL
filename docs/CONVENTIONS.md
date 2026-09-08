@@ -48,13 +48,23 @@ pub fn set_center_freq(dev: &Device, freq_hz: u32) -> Result<(), RailError> {
 ### Component rules
 - Functional components only
 - Props interface defined inline above the component
-- No inline styles — use CSS modules or Tailwind classes
+- No inline styles (Tailwind is not used — see `TECH_STACK.md`)
 - Self-explanatory naming: no comments needed for UI logic
 
 ### State management
 - All radio state in `store/radio.ts` (zustand)
 - All session/capture state in `store/session.ts`
 - No local state for data that affects multiple components
+
+### Styling
+- Two stylesheets, imported in this order by `App.tsx`:
+  `App.css` is layout and structure, `src/theme.css` is the visual identity
+  (colour, type, spacing). The skin loads second so it wins.
+- Never put a colour or font in `App.css`. A second palette there is how the
+  previous one went stale unnoticed.
+- The palette rationale, its measured contrast ratios and the rules that keep
+  them (fills vs marks vs edges, the 24px target floor, the tracking ceiling)
+  live in the `theme.css` header comment — not duplicated here.
 
 ### IPC rules
 - All `invoke()` and `listen()` calls in `/src/ipc/` only

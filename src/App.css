@@ -1,15 +1,8 @@
-:root {
-  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-size: 14px;
-  color: #d7dde3;
-  background-color: #0b0d10;
-
-  /* Scientific-instrument palette shared by axis + filter marker. */
-  --accent-tuned: #7ee7ff;
-  --axis-label: #9aa7b5;
-  --axis-tick-major: #6b7785;
-  --axis-tick-minor: #2a3442;
-}
+/* Layout and structure. Every colour, font and size decision lives in
+ * theme.css, which is imported after this file and therefore wins. Do not
+ * reintroduce a palette here: two sources of truth is how the old one went
+ * stale without anyone noticing.
+ */
 
 * {
   box-sizing: border-box;
@@ -21,7 +14,6 @@ html,
   margin: 0;
   padding: 0;
   height: 100%;
-  background-color: #0b0d10;
 }
 
 .app {
