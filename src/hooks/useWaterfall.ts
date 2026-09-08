@@ -21,9 +21,9 @@ import {
   startReplay,
   startStream,
   stopStream,
-  type RailError,
   type StartStreamReply,
 } from "../ipc/commands";
+import { formatIpcError } from "../ipc/errors";
 import { useRadioStore } from "../store/radio";
 import { useReplayStore } from "../store/replay";
 
@@ -38,22 +38,6 @@ export type UseWaterfallOptions = {
 export type UseWaterfallState = {
   session: WaterfallSession | null;
   error: string | null;
-};
-
-const isRailError = (value: unknown): value is RailError => {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "kind" in value &&
-    typeof (value).kind === "string"
-  );
-};
-
-const formatError = (err: unknown): string => {
-  if (isRailError(err)) {
-    return err.message ? `${err.kind}: ${err.message}` : err.kind;
-  }
-  return String(err);
 };
 
 export const useWaterfall = ({
@@ -168,7 +152,7 @@ export const useWaterfall = ({
         rafId = window.requestAnimationFrame(drain);
       } catch (err) {
         if (!cancelled) {
-          setError(formatError(err));
+          setError(formatIpcError(err));
           setSession(null);
           radio.setStreaming(false);
         }

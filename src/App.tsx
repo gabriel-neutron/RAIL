@@ -4,8 +4,8 @@ import {
   ping,
   stopStream,
   type DeviceInfo,
-  type RailError,
 } from "./ipc/commands";
+import { isRailError } from "./ipc/errors";
 import {
   subscribeDeviceStatus,
   subscribeReplayPosition,
@@ -37,15 +37,6 @@ type DeviceState =
   | { status: "checking" }
   | { status: "found"; device: DeviceInfo }
   | { status: "missing"; message: string };
-
-const isRailError = (value: unknown): value is RailError => {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "kind" in value &&
-    typeof (value).kind === "string"
-  );
-};
 
 /// Matches `AUDIO_RATE_HZ` in `src-tauri/src/dsp/demod/mod.rs`. The
 /// start_stream reply reports this rate verbatim; keeping a constant
