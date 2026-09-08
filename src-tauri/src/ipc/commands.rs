@@ -152,18 +152,6 @@ pub fn set_gain(args: SetGainArgs, state: State<'_, AppState>) -> Result<(), Rai
     }
 }
 
-#[tauri::command]
-pub fn available_gains(state: State<'_, AppState>) -> Result<Vec<i32>, RailError> {
-    let guard = state.session.lock().map_err(session_poisoned)?;
-    Ok(guard
-        .as_ref()
-        .and_then(|s| match &s.source {
-            SessionSource::Live(l) => Some(l.gains.clone()),
-            SessionSource::Replay(_) => None,
-        })
-        .unwrap_or_default())
-}
-
 /// Arguments for [`retune`].
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -476,7 +464,6 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             crate::ipc::session::live::start_stream,
             stop_stream,
             set_gain,
-            available_gains,
             retune,
             set_ppm,
             set_mode,

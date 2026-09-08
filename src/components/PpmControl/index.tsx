@@ -1,18 +1,12 @@
 import { useEffect, useState } from "react";
 
-import { setPpm as setPpmCommand } from "../../ipc/commands";
 import { useRadioStore } from "../../store/radio";
 import { useReplayStore } from "../../store/replay";
-
-const MIN_PPM = -200;
-const MAX_PPM = 200;
-
-const clamp = (n: number): number => Math.max(MIN_PPM, Math.min(MAX_PPM, n | 0));
 
 export const PpmControl = () => {
   const streaming = useRadioStore((s) => s.streaming);
   const ppm = useRadioStore((s) => s.ppm);
-  const setPpm = useRadioStore((s) => s.setPpm);
+  const applyPpm = useRadioStore((s) => s.applyPpm);
   const replayActive = useReplayStore((s) => s.active);
 
   const [draft, setDraft] = useState<string>(String(ppm));
@@ -28,16 +22,15 @@ export const PpmControl = () => {
       setDraft(String(ppm));
       return;
     }
-    const next = clamp(parsed);
-    setPpm(next);
-    setDraft(String(next));
-    if (!streaming || replayActive) return;
     try {
-      await setPpmCommand(next);
+      // Clamping and the streaming/replay guard live behind the seam;
+      // the field only owns parsing and what it shows.
+      await applyPpm(parsed);
       setError(null);
     } catch (err) {
       setError(String(err));
     }
+    setDraft(String(useRadioStore.getState().ppm));
   };
 
   return (

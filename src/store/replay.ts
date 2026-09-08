@@ -1,4 +1,3 @@
-import { open } from "@tauri-apps/plugin-dialog";
 import { create } from "zustand";
 
 import {
@@ -7,6 +6,7 @@ import {
   stopStream,
   type ReplayInfoReply,
 } from "../ipc/commands";
+import { transport } from "../ipc/transport";
 
 export type ReplayInfo = ReplayInfoReply;
 
@@ -57,11 +57,10 @@ export const useReplayStore = create<ReplayState>((set, get) => ({
 
   openFile: async () => {
     try {
-      const picked = await open({
-        multiple: false,
+      const picked = await transport().pickOpenPath({
         filters: [{ name: "SigMF data", extensions: ["sigmf-data"] }],
       });
-      if (!picked || Array.isArray(picked)) return;
+      if (!picked) return;
 
       // Load metadata up-front; the pipeline hook will call
       // `start_replay` once the live stream has been torn down.

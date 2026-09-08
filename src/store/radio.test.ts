@@ -1,10 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// `radio.ts` still imports the command module and hands it to the control
+// seam, so mocking the module is still a live interception point.
 vi.mock("../ipc/commands", () => ({
   retune: vi.fn(() => Promise.resolve({ frequencyHz: 0 })),
   setBandwidth: vi.fn(() => Promise.resolve()),
   setMode: vi.fn(() => Promise.resolve()),
   setSquelch: vi.fn(() => Promise.resolve()),
+  setGain: vi.fn(() => Promise.resolve()),
+  setPpm: vi.fn(() => Promise.resolve()),
 }));
 
 import {
@@ -176,5 +180,116 @@ describe("setStreaming", () => {
     useRadioStore.getState().setStreaming(true);
     vi.runAllTimers();
     expect(setMode).toHaveBeenCalledWith("USB");
+  });
+});
+
+describe("setAvailableGains", () => {
+  it("snaps to the hardware midpoint when the current pick is unsupported", () => {
+    useRadioStore.setState({ gainTenthsDb: 12 });
+    useRadioStore.getState().setAvailableGains([0, 87, 166, 496]);
+    expect(useRadioStore.getState().gainTenthsDb).toBe(166);
+  });
+
+  it("leaves a supported pick alone", () => {
+    useRadioStore.setState({ gainTenthsDb: 87 });
+    useRadioStore.getState().setAvailableGains([0, 87, 166, 496]);
+    expect(useRadioStore.getState().gainTenthsDb).toBe(87);
+  });
+
+  it("never touches the gain when the device reports no list", () => {
+    useRadioStore.setState({ gainTenthsDb: 42 });
+    useRadioStore.getState().setAvailableGains([]);
+    expect(useRadioStore.getState().gainTenthsDb).toBe(42);
+  });
+});
+
+describe("selectGainIndex", () => {
+  it("clamps at both ends of the hardware list", () => {
+    useRadioStore.setState({ availableGainsTenthsDb: [0, 87, 166, 496] });
+    useRadioStore.getState().selectGainIndex(-5);
+    expect(useRadioStore.getState().gainTenthsDb).toBe(0);
+    useRadioStore.getState().selectGainIndex(99);
+    expect(useRadioStore.getState().gainTenthsDb).toBe(496);
+  });
+
+  it("is a no-op without a hardware list", () => {
+    useRadioStore.setState({ availableGainsTenthsDb: [], gainTenthsDb: 7 });
+    useRadioStore.getState().selectGainIndex(2);
+    expect(useRadioStore.getState().gainTenthsDb).toBe(7);
+  });
+
+  it("pushes the pick only in manual gain", async () => {
+    const { setGain } = await import("../ipc/commands");
+    useRadioStore.setState({
+      streaming: true,
+      autoGain: true,
+      availableGainsTenthsDb: [0, 87, 166, 496],
+    });
+    useRadioStore.getState().selectGainIndex(1);
+    vi.runAllTimers();
+    expect(setGain).not.toHaveBeenCalled();
+
+    useRadioStore.setState({ autoGain: false });
+    useRadioStore.getState().selectGainIndex(3);
+    vi.runAllTimers();
+    expect(setGain).toHaveBeenCalledWith({ auto: false, tenthsDb: 496 });
+  });
+});
+
+describe("setAutoGain", () => {
+  it("pushes auto on, and the stored gain on manual", async () => {
+    const { setGain } = await import("../ipc/commands");
+    useRadioStore.setState({ streaming: true, gainTenthsDb: 166 });
+
+    useRadioStore.getState().setAutoGain(true);
+    vi.runAllTimers();
+    expect(setGain).toHaveBeenLastCalledWith({ auto: true });
+
+    useRadioStore.getState().setAutoGain(false);
+    vi.runAllTimers();
+    expect(setGain).toHaveBeenLastCalledWith({ auto: false, tenthsDb: 166 });
+  });
+
+  it("does not reach the tuner during replay", async () => {
+    const { setGain } = await import("../ipc/commands");
+    useReplayStore.setState({ active: true });
+    useRadioStore.setState({ streaming: true });
+    useRadioStore.getState().setAutoGain(false);
+    vi.runAllTimers();
+    expect(setGain).not.toHaveBeenCalled();
+  });
+});
+
+describe("ppm", () => {
+  it("truncates toward zero and clamps to +/-200", () => {
+    const { setPpm } = useRadioStore.getState();
+    setPpm(12.9);
+    expect(useRadioStore.getState().ppm).toBe(12);
+    setPpm(-12.9);
+    expect(useRadioStore.getState().ppm).toBe(-12);
+    setPpm(9_000);
+    expect(useRadioStore.getState().ppm).toBe(200);
+    setPpm(-9_000);
+    expect(useRadioStore.getState().ppm).toBe(-200);
+  });
+
+  it("takes what parseInt makes of a trailing-garbage entry", () => {
+    useRadioStore.getState().setPpm(Number.parseInt("12abc", 10));
+    expect(useRadioStore.getState().ppm).toBe(12);
+  });
+
+  it("applyPpm stores the clamped value and pushes it while streaming", async () => {
+    const { setPpm: setPpmCmd } = await import("../ipc/commands");
+    useRadioStore.setState({ streaming: true });
+    await useRadioStore.getState().applyPpm(9_000);
+    expect(useRadioStore.getState().ppm).toBe(200);
+    expect(setPpmCmd).toHaveBeenCalledWith(200);
+  });
+
+  it("applyPpm still records the value when the radio is idle", async () => {
+    const { setPpm: setPpmCmd } = await import("../ipc/commands");
+    await useRadioStore.getState().applyPpm(30);
+    expect(useRadioStore.getState().ppm).toBe(30);
+    expect(setPpmCmd).not.toHaveBeenCalled();
   });
 });

@@ -152,6 +152,9 @@ cargo clippy --all-targets -- -D warnings
 # TypeScript check
 npx tsc --noEmit
 
+# Frontend tests
+npm test
+
 # Frontend build
 npm run build
 

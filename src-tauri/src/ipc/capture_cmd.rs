@@ -229,6 +229,16 @@ pub struct StartIqCaptureReply {
     pub suggested_name: String,
 }
 
+/// Arguments for [`start_iq_capture`].
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartIqCaptureArgs {
+    /// Classifier hint recorded in the SigMF metadata. Absent when no
+    /// signal was confirmed at the moment the recording started.
+    #[serde(default)]
+    pub signal_type_guess: Option<String>,
+}
+
 /// Open a temp SigMF writer and start mirroring every shifted cf32
 /// sample into it. The `.sigmf-data` path is what users care about
 /// when picking a save location; the `.sigmf-meta` sibling is kept
@@ -237,7 +247,7 @@ pub struct StartIqCaptureReply {
 pub async fn start_iq_capture<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, AppState>,
-    signal_type_guess: Option<String>,
+    args: StartIqCaptureArgs,
 ) -> Result<StartIqCaptureReply, RailError> {
     let radio = radio_snapshot(&state)?;
     let data_temp = new_tmp_path(&app, "sigmf-data")?;
@@ -255,7 +265,7 @@ pub async fn start_iq_capture<R: Runtime>(
         filter_bandwidth_hz: radio.bandwidth_hz,
         squelch_dbfs: radio.squelch_dbfs,
         datetime_iso8601: iso8601_compact(now_secs()?),
-        signal_type_guess,
+        signal_type_guess: args.signal_type_guess,
     };
     tx.send(DspControl::Capture(CaptureControl::StartIq {
         meta_path: meta_temp.clone(),
@@ -418,6 +428,19 @@ mod tests {
     fn iso8601_matches_2024_01_02_12_34_56() {
         // 2024-01-02T12:34:56Z = 1704198896
         assert_eq!(iso8601_compact(1_704_198_896), "20240102T123456Z");
+    }
+
+    #[test]
+    fn start_iq_capture_args_deserialize_from_the_camel_case_envelope() {
+        let args: StartIqCaptureArgs =
+            serde_json::from_str(r#"{"signalTypeGuess": "ADS-B"}"#).unwrap();
+        assert_eq!(args.signal_type_guess.as_deref(), Some("ADS-B"));
+    }
+
+    #[test]
+    fn start_iq_capture_args_default_to_no_guess() {
+        let args: StartIqCaptureArgs = serde_json::from_str("{}").unwrap();
+        assert!(args.signal_type_guess.is_none());
     }
 
     #[test]

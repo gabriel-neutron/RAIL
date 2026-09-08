@@ -1,4 +1,14 @@
-import { Channel, invoke } from "@tauri-apps/api/core";
+// Typed wrappers over the backend commands. `Channel` is imported as a
+// type only — the runtime edge lives in `tauriTransport.ts`, and a value
+// import here would put the Tauri runtime back in every store's graph.
+//
+// Envelope rule: a command whose Rust signature takes a
+// `#[derive(Deserialize)]` args struct is passed a single `{ args }`
+// object; a parameterless command is passed nothing. Sibling handles
+// that are not part of the struct (e.g. `Channel`s) sit next to `args`.
+import type { Channel } from "@tauri-apps/api/core";
+
+import { transport } from "./transport";
 
 export type DeviceInfo = {
   index: number;
@@ -37,51 +47,49 @@ export type SetGainArgs = {
   tenthsDb?: number;
 };
 
-export const ping = (): Promise<string> => invoke<string>("ping");
+export const ping = (): Promise<string> => transport().invoke<string>("ping");
 
 export const checkDevice = (): Promise<DeviceInfo> =>
-  invoke<DeviceInfo>("check_device");
+  transport().invoke<DeviceInfo>("check_device");
 
 export const startStream = (
   args: StartStreamArgs,
   waterfallChannel: Channel<ArrayBuffer>,
   audioChannel: Channel<ArrayBuffer>,
 ): Promise<StartStreamReply> =>
-  invoke<StartStreamReply>("start_stream", {
+  transport().invoke<StartStreamReply>("start_stream", {
     args,
     waterfallChannel,
     audioChannel,
   });
 
-export const stopStream = (): Promise<void> => invoke<void>("stop_stream");
+export const stopStream = (): Promise<void> =>
+  transport().invoke<void>("stop_stream");
 
 export const setGain = (args: SetGainArgs): Promise<void> =>
-  invoke<void>("set_gain", { args });
-
-export const availableGains = (): Promise<number[]> =>
-  invoke<number[]>("available_gains");
+  transport().invoke<void>("set_gain", { args });
 
 export type RetuneReply = {
   frequencyHz: number;
 };
 
 export const retune = (frequencyHz: number): Promise<RetuneReply> =>
-  invoke<RetuneReply>("retune", { args: { frequencyHz } });
+  transport().invoke<RetuneReply>("retune", { args: { frequencyHz } });
 
 export const setPpm = (ppm: number): Promise<void> =>
-  invoke<void>("set_ppm", { args: { ppm } });
+  transport().invoke<void>("set_ppm", { args: { ppm } });
 
 export type DemodModeWire = "FM" | "NFM" | "AM" | "USB" | "LSB" | "CW";
 
 export const setMode = (mode: DemodModeWire): Promise<void> =>
-  invoke<void>("set_mode", { args: { mode } });
+  transport().invoke<void>("set_mode", { args: { mode } });
 
 export const setBandwidth = (bandwidthHz: number): Promise<void> =>
-  invoke<void>("set_bandwidth", { args: { bandwidthHz } });
+  transport().invoke<void>("set_bandwidth", { args: { bandwidthHz } });
 
 /// `null` disables the gate.
 export const setSquelch = (thresholdDbfs: number | null): Promise<void> =>
-  invoke<void>("set_squelch", { args: { thresholdDbfs } });
+  transport().invoke<void>("set_squelch", { args: { thresholdDbfs } });
 
 export type Bookmark = {
   id: string;
@@ -95,7 +103,7 @@ export type Bookmark = {
 };
 
 export const listBookmarks = (): Promise<Bookmark[]> =>
-  invoke<Bookmark[]>("list_bookmarks");
+  transport().invoke<Bookmark[]>("list_bookmarks");
 
 export const addBookmark = (
   name: string,
@@ -103,17 +111,17 @@ export const addBookmark = (
   mode?: string,
   bandwidthHz?: number,
 ): Promise<Bookmark> =>
-  invoke<Bookmark>("add_bookmark", {
+  transport().invoke<Bookmark>("add_bookmark", {
     args: { name, frequencyHz, mode: mode ?? null, bandwidthHz: bandwidthHz ?? null },
   });
 
 export const removeBookmark = (id: string): Promise<void> =>
-  invoke<void>("remove_bookmark", { args: { id } });
+  transport().invoke<void>("remove_bookmark", { args: { id } });
 
 export const replaceBookmarks = (
   bookmarks: Bookmark[],
 ): Promise<Bookmark[]> =>
-  invoke<Bookmark[]>("replace_bookmarks", { args: { bookmarks } });
+  transport().invoke<Bookmark[]>("replace_bookmarks", { args: { bookmarks } });
 
 /* -------- Capture (screenshot / audio / IQ) -------- */
 
@@ -123,7 +131,7 @@ export type StartAudioCaptureReply = {
 };
 
 export const startAudioCapture = (): Promise<StartAudioCaptureReply> =>
-  invoke<StartAudioCaptureReply>("start_audio_capture");
+  transport().invoke<StartAudioCaptureReply>("start_audio_capture");
 
 export type StopAudioCaptureReply = {
   tempPath: string;
@@ -134,7 +142,7 @@ export type StopAudioCaptureReply = {
 };
 
 export const stopAudioCapture = (): Promise<StopAudioCaptureReply> =>
-  invoke<StopAudioCaptureReply>("stop_audio_capture");
+  transport().invoke<StopAudioCaptureReply>("stop_audio_capture");
 
 export type StartIqCaptureReply = {
   tempMetaPath: string;
@@ -145,7 +153,9 @@ export type StartIqCaptureReply = {
 export const startIqCapture = (
   signalTypeGuess?: string | null,
 ): Promise<StartIqCaptureReply> =>
-  invoke<StartIqCaptureReply>("start_iq_capture", { signalTypeGuess: signalTypeGuess ?? null });
+  transport().invoke<StartIqCaptureReply>("start_iq_capture", {
+    args: { signalTypeGuess: signalTypeGuess ?? null },
+  });
 
 export type StopIqCaptureReply = {
   tempMetaPath: string;
@@ -156,10 +166,10 @@ export type StopIqCaptureReply = {
 };
 
 export const stopIqCapture = (): Promise<StopIqCaptureReply> =>
-  invoke<StopIqCaptureReply>("stop_iq_capture");
+  transport().invoke<StopIqCaptureReply>("stop_iq_capture");
 
 export const finalizeCapture = (src: string, dst: string): Promise<void> =>
-  invoke<void>("finalize_capture", { args: { src, dst } });
+  transport().invoke<void>("finalize_capture", { args: { src, dst } });
 
 export const finalizeIqCapture = (
   srcMeta: string,
@@ -167,21 +177,21 @@ export const finalizeIqCapture = (
   dstMeta: string,
   dstData: string,
 ): Promise<void> =>
-  invoke<void>("finalize_iq_capture", {
+  transport().invoke<void>("finalize_iq_capture", {
     args: { srcMeta, srcData, dstMeta, dstData },
   });
 
 export const discardCapture = (paths: string[]): Promise<void> =>
-  invoke<void>("discard_capture", { args: { paths } });
+  transport().invoke<void>("discard_capture", { args: { paths } });
 
 export const screenshotSuggestion = (): Promise<{ suggestedName: string }> =>
-  invoke<{ suggestedName: string }>("screenshot_suggestion");
+  transport().invoke<{ suggestedName: string }>("screenshot_suggestion");
 
 export const saveScreenshot = (
   dst: string,
   pngBytes: Uint8Array,
 ): Promise<void> =>
-  invoke<void>("save_screenshot", {
+  transport().invoke<void>("save_screenshot", {
     args: { dst, pngBytes: Array.from(pngBytes) },
   });
 
@@ -209,14 +219,14 @@ export type StartReplayReply = {
 };
 
 export const openReplay = (dataPath: string): Promise<ReplayInfoReply> =>
-  invoke<ReplayInfoReply>("open_replay", { args: { dataPath } });
+  transport().invoke<ReplayInfoReply>("open_replay", { args: { dataPath } });
 
 export const startReplay = (
   dataPath: string,
   waterfallChannel: Channel<ArrayBuffer>,
   audioChannel: Channel<ArrayBuffer>,
 ): Promise<StartReplayReply> =>
-  invoke<StartReplayReply>("start_replay", {
+  transport().invoke<StartReplayReply>("start_replay", {
     args: { dataPath },
     waterfallChannel,
     audioChannel,
@@ -230,7 +240,7 @@ export type ReplayTransport =
   | { kind: "seek"; positionMs: number };
 
 export const replayTransport = (args: ReplayTransport): Promise<void> =>
-  invoke<void>("replay_transport", { args });
+  transport().invoke<void>("replay_transport", { args });
 
 /* -------- Scanner (wideband frequency sweep) -------- */
 
@@ -250,6 +260,7 @@ export const startScan = (
   args: StartScanArgs,
   scanChannel: Channel<ArrayBuffer>,
 ): Promise<ScanStartReply> =>
-  invoke<ScanStartReply>("start_scan", { args, scanChannel });
+  transport().invoke<ScanStartReply>("start_scan", { args, scanChannel });
 
-export const stopScan = (): Promise<void> => invoke<void>("stop_scan");
+export const stopScan = (): Promise<void> =>
+  transport().invoke<void>("stop_scan");

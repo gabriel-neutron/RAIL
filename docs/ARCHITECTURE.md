@@ -64,8 +64,33 @@ components/    Waterfall, FrequencyControl, ModeSelector, FilterBandMarker,
                Scanner (band-activity canvas + sweep controls)
 store/         zustand: radio / capture / replay / scanner
 hooks/         useWaterfall, useAudio
-ipc/           commands.ts, events.ts
+ipc/           transport.ts (port), tauriTransport.ts (the one Tauri-importing
+               module), commands.ts, radioControl.ts (control seam), events.ts
+test/          mockTransport.ts, fakeClock.ts — the adapters tests inject
 ```
+
+### The frontend control seam
+
+Nothing in `store/` or `components/` imports `@tauri-apps` at runtime. The
+host is reached through the `IpcTransport` port in `ipc/transport.ts`
+(`invoke` plus the two native path pickers); `main.tsx` installs
+`tauriTransport` at start-up, and a test installs `createMockTransport()`.
+An unset transport throws, so a missed wiring fails loudly.
+
+Everything between "the user moved a knob" and "a command left the app"
+lives in `ipc/radioControl.ts`: per-verb debouncing over an injected
+`Clock`, the gain and PPM clamping policy, and the two dispatch guards.
+The seam holds no session state — it takes `canControl` (streaming) and
+`canTouchHardware` (streaming and not replaying) as predicates and reads
+them at dispatch time, so it cannot desync from the stores. The store
+builds its dispatcher inside the zustand creator, which keeps the debounce
+timers out of module scope and resettable between tests. Components keep
+their `disabled` props: the guards decide what is sent, not what is shown.
+
+Command wrappers follow one envelope rule, mirroring the Rust signatures:
+a command whose handler takes a `#[derive(Deserialize)]` args struct is
+passed a single `{ args }` object, and a parameterless command is passed
+nothing. Sibling `Channel` handles ride alongside `args`, not inside it.
 
 ---
 
@@ -82,7 +107,6 @@ RAIL uses two distinct IPC surfaces: **named JSON events** (low-rate status and 
 | `start_stream` | `startStream(args, waterfallCh, audioCh)` | Open device, start DSP worker; returns FFT/sample-rate metadata |
 | `stop_stream` | `stopStream()` | Cancel the read thread, join the DSP worker |
 | `set_gain` | `setGain({ auto, tenthsDb? })` | Auto or explicit gain step |
-| `available_gains` | `availableGains()` | Supported gain steps (tenths dB) |
 | `retune` | `retune(frequencyHz)` | Retune the tuner; echoes applied frequency |
 | `set_ppm` | `setPpm(ppm)` | Tuner PPM correction |
 | `set_mode` | `setMode(mode)` | `FM` / `NFM` / `AM` / `USB` / `LSB` / `CW` |

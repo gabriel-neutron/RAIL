@@ -202,9 +202,9 @@ export const MenuBar = () => {
 
   const handleBandClick = async (band: Band) => {
     setOpen(null);
-    if (!streaming) return;
     useRadioStore.getState().setFrequency(band.centerHz);
     if (!classifierEnabled) return;
+    if (!useRadioStore.getState().canTouchHardware()) return;
     const startHz = Math.max(500_000, band.centerHz - band.scanRangeHz);
     const stopHz = band.centerHz + band.scanRangeHz;
     const scannerStore = useScannerStore.getState();

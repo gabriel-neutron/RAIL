@@ -1,12 +1,13 @@
 import { create } from "zustand";
 
-import {
-  retune,
-  setBandwidth as setBandwidthCmd,
-  setMode as setModeCmd,
-  setSquelch as setSquelchCmd,
-} from "../ipc/commands";
+import * as commands from "../ipc/commands";
 import { type SignalClassificationPayload } from "../ipc/events";
+import {
+  clampGainIndex,
+  clampPpm,
+  createRadioControl,
+  snapGainToNearest,
+} from "../ipc/radioControl";
 import { useReplayStore } from "./replay";
 
 /// Every demodulation mode the backend accepts, in selector order.
@@ -67,6 +68,10 @@ export type RadioState = {
   /// Latest signal classification from the backend; `null` when no signal
   /// is above the noise floor or no stream is running.
   classification: SignalClassificationPayload | null;
+  /// True when a live device is attached and reachable — a stream is
+  /// running and no replay has taken over. The predicate is defined once,
+  /// in the control seam; this is the store's window onto it.
+  canTouchHardware: () => boolean;
   setFrequency: (hz: number) => void;
   /// Mirror a frequency the backend has already tuned to. Updates the
   /// display only — no retune is scheduled, because the hardware is
@@ -77,8 +82,16 @@ export type RadioState = {
   setBandwidth: (hz: number) => void;
   setAutoGain: (auto: boolean) => void;
   setGainTenthsDb: (tenths: number) => void;
+  /// Adopt the hardware-supplied gain list, snapping the current pick
+  /// onto it when the device does not offer that exact value.
   setAvailableGains: (gains: number[]) => void;
+  /// Pick a gain by slider index, clamped to the hardware list, and push
+  /// it when the radio is in manual gain.
+  selectGainIndex: (index: number) => void;
   setPpm: (ppm: number) => void;
+  /// Clamp, store and push a crystal correction. Rejects to the caller so
+  /// the PPM field can render the backend's complaint.
+  applyPpm: (ppm: number) => Promise<void>;
   setFreqUnit: (unit: FreqUnit) => void;
   setStreaming: (streaming: boolean) => void;
   setVolume: (v: number) => void;
@@ -97,9 +110,6 @@ export type RadioState = {
   setClassifierEnabled: (v: boolean) => void;
 };
 
-const RETUNE_DEBOUNCE_MS = 30;
-const COMMAND_DEBOUNCE_MS = 60;
-
 /// Reference bandwidth for each mode — used to rescale the squelch threshold
 /// when switching modes so the gate position stays constant in SNR terms.
 /// See `docs/DSP.md` §6 (NFM/WBFM squelch note).
@@ -112,141 +122,131 @@ const SQUELCH_REF_BW_HZ: Record<DemodMode, number> = {
   CW: 500,
 };
 
-let retuneTimer: ReturnType<typeof setTimeout> | null = null;
-let pendingRetuneHz: number | null = null;
+export const useRadioStore = create<RadioState>((set, get) => {
+  // Constructed inside the store creator so the debounce timers live and
+  // die with the store — no module-level singleton to leak across tests.
+  const control = createRadioControl({
+    commands,
+    guards: {
+      canControl: () => get().streaming,
+      canTouchHardware: () =>
+        get().streaming && !useReplayStore.getState().active,
+    },
+  });
 
-const scheduleRetune = (hz: number, streaming: boolean) => {
-  pendingRetuneHz = hz;
-  if (!streaming) return;
-  if (retuneTimer !== null) return;
-  retuneTimer = setTimeout(() => {
-    retuneTimer = null;
-    const target = pendingRetuneHz;
-    pendingRetuneHz = null;
-    if (target === null) return;
-    retune(target).catch((err) => {
-      console.warn("[RAIL] retune failed:", err);
-    });
-  }, RETUNE_DEBOUNCE_MS);
-};
-
-const makeDebouncer = <T,>(
-  label: string,
-  dispatch: (value: T) => Promise<unknown>,
-) => {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let pending: { value: T } | null = null;
-  return (value: T, streaming: boolean) => {
-    pending = { value };
-    if (!streaming) return;
-    if (timer !== null) return;
-    timer = setTimeout(() => {
-      timer = null;
-      const next = pending;
-      pending = null;
-      if (next === null) return;
-      dispatch(next.value).catch((err) => {
-        console.warn(`[RAIL] ${label} failed:`, err);
+  return {
+    canTouchHardware: control.canTouchHardware,
+    frequencyHz: 100_000_000,
+    sampleRateHz: 2_048_000,
+    mode: "FM",
+    bandwidthHz: 200_000,
+    autoGain: true,
+    gainTenthsDb: 0,
+    availableGainsTenthsDb: [],
+    ppm: 0,
+    freqUnit: "MHz",
+    streaming: false,
+    volume: 0.1,
+    muted: false,
+    squelchDbfs: null,
+    zoom: 1,
+    signalLevel: null,
+    classification: null,
+    autoApplyMode: false,
+    classifierEnabled: true,
+    setFrequency: (frequencyHz) => {
+      // Replay sessions are locked to the capture's center frequency; the
+      // backend would reject any retune with `InvalidParameter` anyway, so
+      // we drop the change at the source to keep the UI honest.
+      if (useReplayStore.getState().active) return;
+      // Round to integer Hz — the backend `retune` command deserializes
+      // `frequencyHz` as `u32`, so fractional values (e.g. from click-to-tune
+      // pixel math) would be silently rejected by serde.
+      const hz = Math.max(0, Math.round(frequencyHz));
+      set({ frequencyHz: hz });
+      control.retune(hz);
+    },
+    syncFrequencyFromBackend: (frequencyHz) =>
+      set({ frequencyHz: Math.max(0, Math.round(frequencyHz)) }),
+    setSampleRate: (sampleRateHz) => set({ sampleRateHz }),
+    setMode: (mode) => {
+      const prev = get().mode;
+      set({ mode });
+      control.mode(mode);
+      // Rescale the active squelch threshold to keep the SNR gate constant
+      // when moving between modes with different reference bandwidths.
+      // See docs/DSP.md §6 (squelch note).
+      const squelch = get().squelchDbfs;
+      if (squelch !== null && Number.isFinite(squelch) && prev !== mode) {
+        const offset = 10 * Math.log10(SQUELCH_REF_BW_HZ[mode] / SQUELCH_REF_BW_HZ[prev]);
+        const rescaled = Math.max(-100, Math.min(0, squelch + offset));
+        set({ squelchDbfs: rescaled });
+        control.squelch(rescaled);
+      }
+    },
+    setBandwidth: (bandwidthHz) => {
+      set({ bandwidthHz });
+      control.bandwidth(bandwidthHz);
+    },
+    setAutoGain: (autoGain) => {
+      set({ autoGain });
+      control.gain(
+        autoGain ? { auto: true } : { auto: false, tenthsDb: get().gainTenthsDb },
+      );
+    },
+    setGainTenthsDb: (gainTenthsDb) => set({ gainTenthsDb }),
+    setAvailableGains: (availableGainsTenthsDb) => {
+      set({ availableGainsTenthsDb });
+      if (availableGainsTenthsDb.length === 0) return;
+      set({
+        gainTenthsDb: snapGainToNearest(
+          availableGainsTenthsDb,
+          get().gainTenthsDb,
+        ),
       });
-    }, COMMAND_DEBOUNCE_MS);
+    },
+    selectGainIndex: (index) => {
+      const gains = get().availableGainsTenthsDb;
+      if (gains.length === 0) return;
+      const tenths = gains[clampGainIndex(index, gains)];
+      set({ gainTenthsDb: tenths });
+      if (!get().autoGain) control.gain({ auto: false, tenthsDb: tenths });
+    },
+    setPpm: (ppm) => set({ ppm: clampPpm(ppm) }),
+    applyPpm: async (ppm) => {
+      const clamped = clampPpm(ppm);
+      set({ ppm: clamped });
+      await control.ppm(clamped);
+    },
+    setFreqUnit: (freqUnit) => set({ freqUnit }),
+    setStreaming: (streaming) => {
+      set({ streaming });
+      if (streaming) {
+        // Re-push the demod config on stream start so Rust's default
+        // (WBFM/200 kHz/squelch off) matches the UI.
+        const s = get();
+        control.mode(s.mode);
+        control.bandwidth(s.bandwidthHz);
+        control.squelch(s.squelchDbfs);
+      }
+    },
+    setVolume: (v) => set({ volume: Math.max(0, Math.min(1, v)) }),
+    setMuted: (muted) => set({ muted }),
+    setSquelchDbfs: (squelchDbfs) => {
+      set({ squelchDbfs });
+      control.squelch(squelchDbfs);
+    },
+    setZoom: (zoom) => {
+      if (!Number.isFinite(zoom)) return;
+      const clamped = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom));
+      set({ zoom: clamped });
+    },
+    setSignalLevel: (signalLevel) => set({ signalLevel }),
+    setClassification: (classification) => set({ classification }),
+    setAutoApplyMode: (autoApplyMode) => set({ autoApplyMode }),
+    setClassifierEnabled: (classifierEnabled) => {
+      set({ classifierEnabled });
+      if (!classifierEnabled) set({ classification: null });
+    },
   };
-};
-
-const scheduleMode = makeDebouncer<DemodMode>("set_mode", (mode) =>
-  setModeCmd(mode),
-);
-const scheduleBandwidth = makeDebouncer<number>("set_bandwidth", (hz) =>
-  setBandwidthCmd(hz),
-);
-const scheduleSquelch = makeDebouncer<number | null>("set_squelch", (db) =>
-  setSquelchCmd(db),
-);
-
-export const useRadioStore = create<RadioState>((set, get) => ({
-  frequencyHz: 100_000_000,
-  sampleRateHz: 2_048_000,
-  mode: "FM",
-  bandwidthHz: 200_000,
-  autoGain: true,
-  gainTenthsDb: 0,
-  availableGainsTenthsDb: [],
-  ppm: 0,
-  freqUnit: "MHz",
-  streaming: false,
-  volume: 0.1,
-  muted: false,
-  squelchDbfs: null,
-  zoom: 1,
-  signalLevel: null,
-  classification: null,
-  autoApplyMode: false,
-  classifierEnabled: true,
-  setFrequency: (frequencyHz) => {
-    // Replay sessions are locked to the capture's center frequency; the
-    // backend would reject any retune with `InvalidParameter` anyway, so
-    // we drop the change at the source to keep the UI honest.
-    if (useReplayStore.getState().active) return;
-    // Round to integer Hz — the backend `retune` command deserializes
-    // `frequencyHz` as `u32`, so fractional values (e.g. from click-to-tune
-    // pixel math) would be silently rejected by serde.
-    const hz = Math.max(0, Math.round(frequencyHz));
-    set({ frequencyHz: hz });
-    scheduleRetune(hz, get().streaming);
-  },
-  syncFrequencyFromBackend: (frequencyHz) =>
-    set({ frequencyHz: Math.max(0, Math.round(frequencyHz)) }),
-  setSampleRate: (sampleRateHz) => set({ sampleRateHz }),
-  setMode: (mode) => {
-    const prev = get().mode;
-    set({ mode });
-    scheduleMode(mode, get().streaming);
-    // Rescale the active squelch threshold to keep the SNR gate constant
-    // when moving between modes with different reference bandwidths.
-    // See docs/DSP.md §6 (squelch note).
-    const squelch = get().squelchDbfs;
-    if (squelch !== null && Number.isFinite(squelch) && prev !== mode) {
-      const offset = 10 * Math.log10(SQUELCH_REF_BW_HZ[mode] / SQUELCH_REF_BW_HZ[prev]);
-      const rescaled = Math.max(-100, Math.min(0, squelch + offset));
-      set({ squelchDbfs: rescaled });
-      scheduleSquelch(rescaled, get().streaming);
-    }
-  },
-  setBandwidth: (bandwidthHz) => {
-    set({ bandwidthHz });
-    scheduleBandwidth(bandwidthHz, get().streaming);
-  },
-  setAutoGain: (autoGain) => set({ autoGain }),
-  setGainTenthsDb: (gainTenthsDb) => set({ gainTenthsDb }),
-  setAvailableGains: (availableGainsTenthsDb) => set({ availableGainsTenthsDb }),
-  setPpm: (ppm) => set({ ppm }),
-  setFreqUnit: (freqUnit) => set({ freqUnit }),
-  setStreaming: (streaming) => {
-    set({ streaming });
-    if (streaming) {
-      // Re-push the demod config on stream start so Rust's default
-      // (WBFM/200 kHz/squelch off) matches the UI.
-      const s = get();
-      scheduleMode(s.mode, true);
-      scheduleBandwidth(s.bandwidthHz, true);
-      scheduleSquelch(s.squelchDbfs, true);
-    }
-  },
-  setVolume: (v) => set({ volume: Math.max(0, Math.min(1, v)) }),
-  setMuted: (muted) => set({ muted }),
-  setSquelchDbfs: (squelchDbfs) => {
-    set({ squelchDbfs });
-    scheduleSquelch(squelchDbfs, get().streaming);
-  },
-  setZoom: (zoom) => {
-    if (!Number.isFinite(zoom)) return;
-    const clamped = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom));
-    set({ zoom: clamped });
-  },
-  setSignalLevel: (signalLevel) => set({ signalLevel }),
-  setClassification: (classification) => set({ classification }),
-  setAutoApplyMode: (autoApplyMode) => set({ autoApplyMode }),
-  setClassifierEnabled: (classifierEnabled) => {
-    set({ classifierEnabled });
-    if (!classifierEnabled) set({ classification: null });
-  },
-}));
+});
