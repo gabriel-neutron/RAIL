@@ -10,6 +10,9 @@ export default tseslint.config(
       'dist',
       'node_modules',
       'src-tauri',
+      // Workflow scripts run in the Workflow tool's own module context,
+      // not as standalone ESM.
+      '.claude',
       // Generated output; the codegen script is the source of truth.
       'src/ipc/generated',
       // Standalone slide generator, not part of the app build.
