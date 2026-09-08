@@ -1,14 +1,18 @@
 name: CI
 
+# Every branch, not just main: a harness that only runs after merge cannot
+# give feedback on the work that needed it.
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
     branches: [main]
 
-# Superseded runs on the same branch are cancelled instead of queueing.
+# Superseded runs are cancelled instead of queueing. Keying on `head_ref` when
+# it exists collapses a pull_request run and the push run for the same branch
+# into one group, so opening a PR does not double the cost.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 permissions:
