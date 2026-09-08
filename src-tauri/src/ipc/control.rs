@@ -68,6 +68,26 @@ pub(crate) struct RadioParams {
     pub(crate) ppm: i32,
 }
 
+/// The one place a session's starting mode and bandwidth are decided.
+///
+/// Both values are read from [`DemodConfig::default`] rather than
+/// restated, so the worker's chain and the state-of-record cannot drift
+/// apart. `center_hz` has no meaningful default — every caller
+/// overrides it with a tuned or recorded frequency.
+impl Default for RadioParams {
+    fn default() -> Self {
+        let chain_defaults = DemodConfig::default();
+        Self {
+            center_hz: 0,
+            mode: chain_defaults.mode,
+            bandwidth_hz: chain_defaults.bandwidth_hz.max(0.0) as u32,
+            squelch_dbfs: None,
+            gain_tenths_db: None,
+            ppm: 0,
+        }
+    }
+}
+
 impl RadioParams {
     /// Fold one control message into the state-of-record. Messages with
     /// no parameter payload (capture requests) are a no-op.

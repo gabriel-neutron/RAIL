@@ -17,8 +17,8 @@ use crate::capture::sigmf::SigMfStartParams;
 use crate::capture::tmp::{move_file, new_tmp_path};
 use crate::dsp::demod::AUDIO_RATE_HZ;
 use crate::error::RailError;
-use crate::ipc::commands::{session_poisoned, AppState};
 use crate::ipc::control::{DspControl, DspControlHandle};
+use crate::ipc::session::{session_poisoned, AppState};
 
 /// Requests from Tauri commands to the DSP worker that interact with
 /// capture writers. Replies ride on a `oneshot` so commands remain

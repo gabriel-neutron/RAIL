@@ -91,7 +91,7 @@ RAIL uses two distinct IPC surfaces: **named JSON events** (low-rate status and 
 | Bookmarks | `listBookmarks`, `addBookmark`, `removeBookmark`, `replaceBookmarks` | Versioned JSON store CRUD |
 | Capture | `start/stopAudioCapture`, `start/stopIqCapture`, `finalizeCapture`, `finalizeIqCapture`, `discardCapture` | Stage-then-finalize file I/O |
 | Screenshot | `screenshotSuggestion`, `saveScreenshot` | Suggest filename, atomic PNG write |
-| Replay | `openReplay`, `startReplay`, `pauseReplay`, `resumeReplay`, `seekReplay`, `stopReplay` | Transport for SigMF captures (incl. [`docs/assets/demo_iq.sigmf-data`](assets/demo_iq.sigmf-data)) |
+| Replay | `openReplay`, `startReplay`, `replayTransport({kind})` | Transport for SigMF captures (incl. [`docs/assets/demo_iq.sigmf-data`](assets/demo_iq.sigmf-data)); `kind` is `play` / `pause` / `seek`. Teardown goes through `stopStream` |
 | Scanner | `startScan(args, scanCh)`, `stopScan()` | Sequential frequency sweep; `startScan` returns ordered `frequenciesHz[]`; one f32 per step on `scanCh` |
 
 ### 3.2 Named events (Rust → React, JSON)

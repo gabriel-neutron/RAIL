@@ -222,14 +222,15 @@ export const startReplay = (
     audioChannel,
   });
 
-export const pauseReplay = (): Promise<void> => invoke<void>("pause_replay");
+/// Transport verbs for a running replay session. Teardown is not one
+/// of them — closing a file goes through `stopStream()`.
+export type ReplayTransport =
+  | { kind: "play" }
+  | { kind: "pause" }
+  | { kind: "seek"; positionMs: number };
 
-export const resumeReplay = (): Promise<void> => invoke<void>("resume_replay");
-
-export const seekReplay = (positionMs: number): Promise<void> =>
-  invoke<void>("seek_replay", { args: { positionMs } });
-
-export const stopReplay = (): Promise<void> => invoke<void>("stop_replay");
+export const replayTransport = (args: ReplayTransport): Promise<void> =>
+  invoke<void>("replay_transport", { args });
 
 /* -------- Scanner (wideband frequency sweep) -------- */
 

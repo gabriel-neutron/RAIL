@@ -48,7 +48,7 @@ pub struct ScanStartReply {
     pub frequencies_hz: Vec<u32>,
 }
 
-/// Running scanner task stored in [`crate::ipc::commands::AppState`].
+/// Running scanner task stored in [`crate::ipc::session::AppState`].
 pub(crate) struct ScannerHandle {
     pub(crate) cancel: Arc<AtomicBool>,
     pub(crate) handle: tokio::task::JoinHandle<()>,

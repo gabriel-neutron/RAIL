@@ -7,7 +7,13 @@ vi.mock("../ipc/commands", () => ({
   setSquelch: vi.fn(() => Promise.resolve()),
 }));
 
-import { useRadioStore, ZOOM_MAX, ZOOM_MIN } from "./radio";
+import {
+  DEMOD_MODES,
+  parseDemodMode,
+  useRadioStore,
+  ZOOM_MAX,
+  ZOOM_MIN,
+} from "./radio";
 import { useReplayStore } from "./replay";
 
 const initial = useRadioStore.getState();
@@ -132,5 +138,43 @@ describe("setClassifierEnabled", () => {
     });
     useRadioStore.getState().setClassifierEnabled(false);
     expect(useRadioStore.getState().classification).toBeNull();
+  });
+});
+
+describe("parseDemodMode", () => {
+  it("accepts every mode the selector offers", () => {
+    for (const mode of DEMOD_MODES) {
+      expect(parseDemodMode(mode)).toBe(mode);
+    }
+  });
+
+  it("rejects anything else rather than producing a mode with no reference bandwidth", () => {
+    expect(parseDemodMode("SSTV")).toBeNull();
+    expect(parseDemodMode("")).toBeNull();
+    expect(parseDemodMode("fm")).toBeNull();
+  });
+});
+
+describe("setStreaming", () => {
+  it("pushes the adopted replay mode instead of clobbering it back to FM", async () => {
+    const { setBandwidth, setMode } = await import("../ipc/commands");
+    // What useWaterfall does after start_replay returns an NFM sidecar:
+    // the store is still idle, so these writes are local only.
+    useRadioStore.getState().setMode("NFM");
+    useRadioStore.getState().setBandwidth(12_500);
+
+    useRadioStore.getState().setStreaming(true);
+    vi.runAllTimers();
+
+    expect(setMode).toHaveBeenCalledWith("NFM");
+    expect(setBandwidth).toHaveBeenCalledWith(12_500);
+  });
+
+  it("still re-pushes the user's pre-stream selection on a live start", async () => {
+    const { setMode } = await import("../ipc/commands");
+    useRadioStore.getState().setMode("USB");
+    useRadioStore.getState().setStreaming(true);
+    vi.runAllTimers();
+    expect(setMode).toHaveBeenCalledWith("USB");
   });
 });

@@ -23,6 +23,8 @@ use tokio::sync::mpsc;
 use crate::capture::sigmf::SigMfMeta;
 use crate::dsp::input::DspInput;
 use crate::error::RailError;
+use crate::ipc::commands::parse_mode;
+use crate::ipc::control::RadioParams;
 use crate::ipc::dsp_task::FFT_SIZE;
 use crate::ipc::events::ReplayPosition;
 
@@ -62,6 +64,40 @@ impl ReplayInfo {
             return 0;
         }
         self.total_samples.saturating_mul(1_000) / self.sample_rate_hz as u64
+    }
+
+    /// The session parameters this capture should replay through.
+    ///
+    /// The SigMF sidecar is the only source of truth for a replay
+    /// session's centre frequency, mode and bandwidth. Fields the file
+    /// leaves empty (or that name a mode this build does not know) fall
+    /// back to [`RadioParams::default`] — no second set of literals.
+    pub(crate) fn radio_params(&self) -> RadioParams {
+        let defaults = RadioParams::default();
+        let mode = if self.demod_mode.is_empty() {
+            defaults.mode
+        } else {
+            match parse_mode(&self.demod_mode) {
+                Ok(m) => m,
+                Err(e) => {
+                    log::warn!(
+                        "sigmf meta names an unsupported demod mode ({e}); replaying in {}",
+                        defaults.mode_str()
+                    );
+                    defaults.mode
+                }
+            }
+        };
+        RadioParams {
+            center_hz: u32::try_from(self.center_frequency_hz).unwrap_or(u32::MAX),
+            mode,
+            bandwidth_hz: if self.filter_bandwidth_hz == 0 {
+                defaults.bandwidth_hz
+            } else {
+                self.filter_bandwidth_hz
+            },
+            ..defaults
+        }
     }
 }
 
@@ -143,13 +179,16 @@ pub fn load_info(data_path: &Path) -> Result<ReplayInfo, RailError> {
                 .as_u64()
                 .or_else(|| raw["captures"][0]["core:frequency"].as_u64())
                 .unwrap_or(0);
+            // Empty string / 0 are the "file did not say" sentinels;
+            // `ReplayInfo::radio_params` is the only place a default is
+            // applied.
             let mode = raw["global"]["rail:demod_mode"]
                 .as_str()
-                .unwrap_or("FM")
+                .unwrap_or_default()
                 .to_string();
             let bw = raw["global"]["rail:filter_bandwidth_hz"]
                 .as_u64()
-                .unwrap_or(200_000) as u32;
+                .unwrap_or(0) as u32;
             let dt = raw["captures"][0]["core:datetime"]
                 .as_str()
                 .unwrap_or("")
@@ -422,6 +461,25 @@ pub fn spawn_replay_reader<R: tauri::Runtime>(
     })
 }
 
+/// Write a `.sigmf-meta` / `.sigmf-data` pair into a fresh temp
+/// directory and return the data path. `meta_json` is the sidecar
+/// verbatim, so a test can declare either a RAIL-written document or a
+/// bare external one. The directory is left for the OS to reap.
+#[cfg(test)]
+pub(crate) fn write_sigmf_fixture(tag: &str, meta_json: &str, samples: usize) -> PathBuf {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("rail-replay-{tag}-{}-{seq}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let data_path = dir.join("capture.sigmf-data");
+    std::fs::write(&data_path, vec![0u8; samples * BYTES_PER_SAMPLE as usize]).unwrap();
+    std::fs::write(meta_path_for(&data_path), meta_json).unwrap();
+    data_path
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -441,6 +499,108 @@ mod tests {
             meta_path_for(Path::new("/x/y.bin")),
             PathBuf::from("/x/y.sigmf-meta")
         );
+    }
+
+    fn info_with(demod_mode: &str, filter_bandwidth_hz: u32) -> ReplayInfo {
+        ReplayInfo {
+            data_path: PathBuf::from("/x/y.sigmf-data"),
+            meta_path: PathBuf::from("/x/y.sigmf-meta"),
+            sample_rate_hz: 2_048_000,
+            center_frequency_hz: 145_500_000,
+            demod_mode: demod_mode.to_string(),
+            filter_bandwidth_hz,
+            total_samples: 1_024,
+            datetime_iso8601: String::new(),
+        }
+    }
+
+    /// A RAIL-written sidecar decodes through the strict
+    /// [`SigMfMeta`] branch: the recorded mode and bandwidth are what
+    /// the session replays through.
+    #[test]
+    fn load_info_reads_the_recorded_mode_and_bandwidth() {
+        let meta = r#"{
+            "global": {
+                "core:datatype": "cf32_le",
+                "core:sample_rate": 2048000,
+                "core:version": "1.0.0",
+                "core:description": "",
+                "core:author": "RAIL",
+                "rail:center_frequency_hz": 145500000,
+                "rail:tuner_gain_db": 28.0,
+                "rail:demod_mode": "NFM",
+                "rail:filter_bandwidth_hz": 12500
+            },
+            "captures": [
+                {
+                    "core:sample_start": 0,
+                    "core:datetime": "2026-09-07T12:00:00Z",
+                    "core:frequency": 145500000
+                }
+            ],
+            "annotations": []
+        }"#;
+        let data_path = write_sigmf_fixture("nfm", meta, 1_024);
+
+        let info = load_info(&data_path).unwrap();
+        assert_eq!(info.demod_mode, "NFM");
+        assert_eq!(info.filter_bandwidth_hz, 12_500);
+        assert_eq!(info.sample_rate_hz, 2_048_000);
+        assert_eq!(info.total_samples, 1_024);
+
+        let params = info.radio_params();
+        assert_eq!(params.mode, crate::dsp::demod::DemodMode::Nfm);
+        assert_eq!(params.bandwidth_hz, 12_500);
+        assert_eq!(params.center_hz, 145_500_000);
+    }
+
+    /// An external SigMF file states no `rail:` fields. The loose
+    /// branch records the sentinels and `radio_params` is where the one
+    /// set of defaults is applied.
+    #[test]
+    fn load_info_leaves_sentinels_for_an_external_sigmf_file() {
+        let meta = r#"{
+            "global": {
+                "core:datatype": "cf32_le",
+                "core:sample_rate": 2048000
+            },
+            "captures": [{ "core:frequency": 145500000 }],
+            "annotations": []
+        }"#;
+        let data_path = write_sigmf_fixture("external", meta, 1_024);
+
+        let info = load_info(&data_path).unwrap();
+        assert_eq!(info.demod_mode, "");
+        assert_eq!(info.filter_bandwidth_hz, 0);
+
+        let defaults = RadioParams::default();
+        let params = info.radio_params();
+        assert_eq!(params.mode, defaults.mode);
+        assert_eq!(params.bandwidth_hz, defaults.bandwidth_hz);
+    }
+
+    #[test]
+    fn radio_params_uses_sigmf_mode_and_bandwidth() {
+        let params = info_with("NFM", 12_500).radio_params();
+        assert_eq!(params.mode, crate::dsp::demod::DemodMode::Nfm);
+        assert_eq!(params.bandwidth_hz, 12_500);
+        assert_eq!(params.center_hz, 145_500_000);
+    }
+
+    #[test]
+    fn radio_params_falls_back_to_demod_defaults() {
+        let params = info_with("", 0).radio_params();
+        let chain_defaults = crate::dsp::demod::DemodConfig::default();
+        assert_eq!(params.mode, chain_defaults.mode);
+        assert_eq!(params.bandwidth_hz, chain_defaults.bandwidth_hz as u32);
+    }
+
+    #[test]
+    fn unrecognised_sigmf_mode_falls_back_without_panicking() {
+        let params = info_with("SSTV", 12_500).radio_params();
+        assert_eq!(params.mode, RadioParams::default().mode);
+        // A bandwidth the file did state still survives the mode fallback.
+        assert_eq!(params.bandwidth_hz, 12_500);
     }
 
     #[test]

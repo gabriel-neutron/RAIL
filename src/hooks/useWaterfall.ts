@@ -24,7 +24,7 @@ import {
   type StartStreamReply,
 } from "../ipc/commands";
 import { formatIpcError } from "../ipc/errors";
-import { useRadioStore } from "../store/radio";
+import { parseDemodMode, useRadioStore } from "../store/radio";
 import { useReplayStore } from "../store/replay";
 
 export type WaterfallSession = StartStreamReply;
@@ -127,8 +127,13 @@ export const useWaterfall = ({
           // `setFrequency` is guarded against retune during replay, so
           // we write straight to the store instead.
           useRadioStore.setState({ frequencyHz: replyRaw.frequencyHz });
-          if (replyRaw.info.demodMode === "FM" || replyRaw.info.demodMode === "AM") {
-            radio.setMode(replyRaw.info.demodMode);
+          const recordedMode = parseDemodMode(replyRaw.info.demodMode);
+          if (recordedMode) {
+            radio.setMode(recordedMode);
+          } else {
+            console.warn(
+              `[RAIL] replay metadata carries an unknown demod mode "${replyRaw.info.demodMode}"; keeping the current selection`,
+            );
           }
           if (replyRaw.info.filterBandwidthHz > 0) {
             radio.setBandwidth(replyRaw.info.filterBandwidthHz);

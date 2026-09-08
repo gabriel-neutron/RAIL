@@ -2,12 +2,14 @@
 //!
 //! Contract defined in `docs/ARCHITECTURE.md` §3.
 //!
-//! `commands` hosts the session lifecycle and tuning surface. The higher-rate
-//! paths (capture, replay, DSP worker) are split into sibling modules so
-//! `commands.rs` stays readable.
+//! `commands` hosts the tuning surface and teardown. Session assembly
+//! lives in `session`; the higher-rate paths (capture, replay, DSP
+//! worker) are split into sibling modules so `commands.rs` stays
+//! readable.
 
 pub mod commands;
 pub mod events;
+pub mod session;
 
 pub(crate) mod capture_cmd;
 pub(crate) mod control;

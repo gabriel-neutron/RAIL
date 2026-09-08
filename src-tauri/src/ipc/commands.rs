@@ -2,48 +2,27 @@
 //!
 //! Streaming data flows back to the frontend through two per-session
 //! `Channel<InvokeResponseBody>`s that the frontend passes to
-//! [`start_stream`]: one for waterfall frames, one for f32 PCM audio.
+//! [`start_stream`](super::session::live::start_stream): one for
+//! waterfall frames, one for f32 PCM audio.
 //! See `docs/ARCHITECTURE.md` §3 and `docs/DSP.md` §4–5.
 //!
-//! Capture, replay, and the DSP worker live in sibling modules:
-//! [`super::capture_cmd`], [`super::replay_cmd`], [`super::dsp_task`].
+//! Session assembly, capture, replay and the DSP worker live in sibling
+//! modules: [`super::session`], [`super::capture_cmd`],
+//! [`super::replay_cmd`], [`super::dsp_task`].
 
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Runtime, State};
-use tokio::sync::mpsc;
 
 use crate::bookmarks::{Bookmark, BookmarksStore};
-use crate::dsp::demod::{DemodChain, DemodMode, AUDIO_RATE_HZ};
-use crate::dsp::input::DspInput;
+use crate::dsp::demod::DemodMode;
 use crate::error::RailError;
-use crate::hardware::stream::{
-    IqStream, DEFAULT_USB_BUF_LEN, DEFAULT_USB_BUF_NUM, IQ_CHANNEL_CAPACITY,
-};
-use crate::hardware::{self, DeviceInfo, RtlSdrDevice, RtlSdrTuner, Tuner};
-use crate::ipc::control::{DspControl, DspControlHandle, RadioParams};
-use crate::ipc::dsp_task::{spawn_dsp_task, DspTaskCfg, AUDIO_CHUNK_SAMPLES, FFT_SIZE};
-use crate::ipc::events::DeviceStatus;
-use crate::replay::{ReplayControl, ReplayInfo};
-
-// Eagerly bring `DemodChain` into scope for the compiler check that the
-// `dsp::demod` imports stay in sync with what the crate graph exposes.
-// (No runtime use — `DemodChain` is consumed inside [`dsp_task`].)
-#[allow(dead_code)]
-type _DemodChainMarker = DemodChain;
-
-/// Default RTL-SDR sample rate. Stable per `docs/HARDWARE.md` §4.
-const DEFAULT_SAMPLE_RATE_HZ: u32 = 2_048_000;
-/// Default channel bandwidth (Hz) a new session starts at — WBFM
-/// broadcast. Must match `DemodConfig::default()` in `dsp::demod`.
-const DEFAULT_BANDWIDTH_HZ: u32 = 200_000;
-/// Fallback sample rates to probe if the requested one is rejected by
-/// librtlsdr on a specific tuner/driver combo (`set_sample_rate -> -1`).
-/// Ordered by preference.
-const FALLBACK_SAMPLE_RATES_HZ: [u32; 5] = [2_048_000, 1_800_000, 1_400_000, 1_024_000, 900_000];
+use crate::hardware::{self, DeviceInfo, Tuner};
+use crate::ipc::control::DspControl;
+use crate::ipc::session::live::lo_offset_hz;
+use crate::ipc::session::{session_poisoned, AppState, SessionSource};
+use crate::replay::ReplayControl;
 
 /// Mode names accepted over the wire. Kept in sync with
 /// `src/store/radio.ts :: DemodMode`.
@@ -61,90 +40,6 @@ pub(crate) fn parse_mode(s: &str) -> Result<DemodMode, RailError> {
     }
 }
 
-/// One running streaming session. Held inside [`AppState`].
-///
-/// A session is either *live* (RTL-SDR reader + tuner hardware) or
-/// *replay* (SigMF file reader). The DSP-facing fields (`dsp`,
-/// `control`) are shared so the parameter and capture commands do not
-/// care which source is running. Every runtime parameter lives behind
-/// [`control`](Session::control) — the session keeps no shadow copy.
-/// The [`source`](Session::source) enum only covers the bits that
-/// differ between the two modes.
-pub(crate) struct Session {
-    /// JoinHandle for the DSP task (stops when the IQ sender drops).
-    pub(crate) dsp: Option<tokio::task::JoinHandle<()>>,
-    /// Sample rate of the IQ stream feeding the DSP task.
-    pub(crate) sample_rate_hz: u32,
-    /// The one control seam into the DSP worker: parameter and capture
-    /// messages out, plus the parameter state-of-record the capture
-    /// commands read. See [`crate::ipc::control`].
-    pub(crate) control: DspControlHandle,
-    /// Source-specific bits (live hardware vs replay file).
-    pub(crate) source: SessionSource,
-    /// Per-bin peak dBFS accumulator shared with the scanner task.
-    /// The DSP task updates this every waterfall frame; the scanner resets
-    /// it after settle and reads it at dwell end for burst-aware detection.
-    pub(crate) max_dbfs_per_bin: Arc<Mutex<Vec<f32>>>,
-}
-
-/// Source-specific state for a [`Session`].
-pub(crate) enum SessionSource {
-    Live(LiveBits),
-    Replay(ReplayBits),
-}
-
-pub(crate) struct LiveBits {
-    /// RAII for the reader thread. Option so we can take it out in `stop`.
-    stream: Option<IqStream>,
-    /// Thread-safe tuning surface. `None` after the session is torn down
-    /// so that late `set_gain` calls return an error instead of racing
-    /// with device close.
-    tuner: Option<RtlSdrTuner>,
-    /// Discrete gain steps the hardware supports (tenths of dB).
-    gains: Vec<i32>,
-}
-
-pub(crate) struct ReplayBits {
-    /// JoinHandle for the replay reader task.
-    pub(crate) reader: Option<tokio::task::JoinHandle<()>>,
-    /// Transport control channel (play/pause/seek/stop).
-    pub(crate) control_tx: mpsc::UnboundedSender<ReplayControl>,
-    /// Cached file metadata — handed back to the frontend on open /
-    /// used to clamp seek positions without re-reading the file.
-    pub(crate) info: ReplayInfo,
-}
-
-/// LO offset used to push the RTL-SDR DC spike off the center bin.
-/// See `docs/DSP.md` §1 and the `fs/4` mixer in
-/// [`crate::dsp::waterfall::apply_fs4_shift`].
-fn lo_offset_hz(sample_rate_hz: u32) -> u32 {
-    sample_rate_hz / 4
-}
-
-fn sample_rate_candidates(requested_hz: u32) -> Vec<u32> {
-    let mut out = Vec::with_capacity(FALLBACK_SAMPLE_RATES_HZ.len() + 1);
-    out.push(requested_hz);
-    for hz in FALLBACK_SAMPLE_RATES_HZ {
-        if hz != requested_hz {
-            out.push(hz);
-        }
-    }
-    out
-}
-
-/// Global, single-session state.
-#[derive(Default)]
-pub struct AppState {
-    pub(crate) session: Mutex<Option<Session>>,
-    /// Active scanner task, if any. Held separately from `session` to
-    /// avoid deadlocks between the scanner and command handlers.
-    pub(crate) scanner: Mutex<Option<crate::scanner::ScannerHandle>>,
-}
-
-pub(crate) fn session_poisoned<T>(_: std::sync::PoisonError<T>) -> RailError {
-    RailError::StreamError("session lock poisoned".into())
-}
-
 /// Liveness check: returns `"pong"`. Used by the frontend on startup to
 /// verify the IPC bridge is healthy.
 #[tauri::command]
@@ -159,198 +54,15 @@ pub fn check_device() -> Result<DeviceInfo, RailError> {
     hardware::check_device()
 }
 
-/// Parameters for [`start_stream`].
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StartStreamArgs {
-    pub frequency_hz: u32,
-    #[serde(default)]
-    pub sample_rate_hz: Option<u32>,
-}
-
-/// Reply for [`start_stream`]. Tells the frontend what FFT size to
-/// expect on the waterfall channel and how to interpret the audio one.
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StartStreamReply {
-    pub fft_size: usize,
-    pub sample_rate_hz: u32,
-    pub frequency_hz: u32,
-    pub available_gains_tenths_db: Vec<i32>,
-    pub audio_sample_rate_hz: u32,
-    pub audio_chunk_samples: usize,
-}
-
-/// Open the first RTL-SDR, configure it, and start the IQ → FFT/demod
-/// pipeline. The frontend passes two `Channel<ArrayBuffer>` handles:
-/// the first carries waterfall frames (float32), the second carries
-/// mono f32 PCM audio at `audio_sample_rate_hz`.
-#[tauri::command]
-pub async fn start_stream<R: Runtime>(
-    app: AppHandle<R>,
-    args: StartStreamArgs,
-    waterfall_channel: Channel<InvokeResponseBody>,
-    audio_channel: Channel<InvokeResponseBody>,
-    state: State<'_, AppState>,
-) -> Result<StartStreamReply, RailError> {
-    {
-        let guard = state.session.lock().map_err(session_poisoned)?;
-        if guard.is_some() {
-            return Err(RailError::InvalidParameter("stream already running".into()));
-        }
-    } // drop guard before any await points
-
-    let requested_sample_rate_hz = args.sample_rate_hz.unwrap_or(DEFAULT_SAMPLE_RATE_HZ);
-
-    // On Windows with WinUSB, `rtlsdr_open` can succeed while the USB
-    // endpoint is still settling — the first register write then returns
-    // LIBUSB_ERROR_PIPE (-9).  Retry up to 3 times with a 100 ms gap;
-    // the device is always ready within one retry in practice.
-    // See `docs/HARDWARE.md` §6 ("rtlsdr_demod_write_reg failed with -9").
-    const OPEN_RETRIES: usize = 3;
-    let mut last_error = RailError::DeviceNotFound;
-    let mut open_result: Option<(RtlSdrDevice, u32)> = None;
-
-    for attempt in 0..OPEN_RETRIES {
-        if attempt > 0 {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            log::info!(
-                "RTL-SDR open retry {attempt}/{}: USB endpoint may not be ready yet",
-                OPEN_RETRIES - 1
-            );
-        }
-
-        let dev = match RtlSdrDevice::open(0) {
-            Ok(d) => d,
-            Err(e) => {
-                last_error = e;
-                continue;
-            }
-        };
-
-        let mut found_rate: Option<u32> = None;
-        for candidate_hz in sample_rate_candidates(requested_sample_rate_hz) {
-            match dev.set_sample_rate(candidate_hz) {
-                Ok(()) => {
-                    if candidate_hz != requested_sample_rate_hz {
-                        log::warn!(
-                            "sample rate {} rejected; using fallback {}",
-                            requested_sample_rate_hz,
-                            candidate_hz
-                        );
-                    }
-                    found_rate = Some(candidate_hz);
-                    break;
-                }
-                Err(e) => {
-                    log::debug!("set_sample_rate({candidate_hz}): {e}");
-                    last_error = RailError::StreamError(format!(
-                        "failed to set sample rate (requested {requested_sample_rate_hz}): {e}"
-                    ));
-                }
-            }
-        }
-
-        if let Some(rate) = found_rate {
-            open_result = Some((dev, rate));
-            break;
-        }
-        // All rates failed — likely USB pipe error; drop `dev` and retry.
-    }
-
-    let (device, sample_rate) = open_result.ok_or(last_error)?;
-    let offset = lo_offset_hz(sample_rate);
-    // Park the LO `fs/4` below the user's target; the `−fs/4` digital
-    // mixer in `apply_fs4_shift` brings the tuned carrier back to DC
-    // with the hardware DC spike off-center (docs/DSP.md §1).
-    let tuner = device.tuner();
-    tuner.set_center_freq(args.frequency_hz.saturating_sub(offset))?;
-    tuner.set_tuner_gain_mode(false)?;
-    let gains = device.available_gains().unwrap_or_default();
-
-    let actual_freq = tuner.center_freq().saturating_add(offset);
-
-    let (iq_tx, iq_rx) = mpsc::channel::<DspInput>(IQ_CHANNEL_CAPACITY);
-    // Seed the seam with the same defaults `DemodConfig::default()` uses,
-    // so the worker and the state-of-record agree from the first sample.
-    let (control, control_rx) = DspControlHandle::new(RadioParams {
-        center_hz: actual_freq,
-        mode: DemodMode::Fm,
-        bandwidth_hz: DEFAULT_BANDWIDTH_HZ,
-        squelch_dbfs: None,
-        gain_tenths_db: None,
-        ppm: 0,
-    });
-
-    // Fires from the reader thread if the dongle is unplugged mid-stream.
-    let disconnect_app = app.clone();
-    let on_disconnect: Box<dyn FnOnce(String) + Send + 'static> = Box::new(move |reason| {
-        log::warn!("RTL-SDR disconnected mid-stream: {reason}");
-        let _ = DeviceStatus::disconnected_with(reason).emit(&disconnect_app);
-    });
-
-    let stream = IqStream::start(
-        device,
-        iq_tx,
-        DEFAULT_USB_BUF_NUM,
-        DEFAULT_USB_BUF_LEN,
-        on_disconnect,
-    )?;
-    let canceler = stream.canceler();
-
-    let max_dbfs_per_bin = Arc::new(Mutex::new(vec![f32::NEG_INFINITY; FFT_SIZE]));
-
-    let dsp_handle = spawn_dsp_task(DspTaskCfg {
-        app: app.clone(),
-        iq_rx,
-        waterfall_channel,
-        audio_channel,
-        control_rx,
-        canceler: Some(canceler),
-        sample_rate_hz: sample_rate,
-        initial_params: control.snapshot()?,
-        max_dbfs_per_bin: max_dbfs_per_bin.clone(),
-    });
-
-    let mut guard = state.session.lock().map_err(session_poisoned)?;
-    *guard = Some(Session {
-        dsp: Some(dsp_handle),
-        sample_rate_hz: sample_rate,
-        control,
-        source: SessionSource::Live(LiveBits {
-            stream: Some(stream),
-            tuner: Some(tuner),
-            gains: gains.clone(),
-        }),
-        max_dbfs_per_bin,
-    });
-    drop(guard);
-
-    let _ = DeviceStatus::connected().emit(&app);
-
-    Ok(StartStreamReply {
-        fft_size: FFT_SIZE,
-        sample_rate_hz: sample_rate,
-        frequency_hz: actual_freq,
-        available_gains_tenths_db: gains,
-        audio_sample_rate_hz: AUDIO_RATE_HZ as u32,
-        audio_chunk_samples: AUDIO_CHUNK_SAMPLES,
-    })
-}
-
 /// Stop the streaming session and release the hardware. Idempotent.
 ///
-/// The `_app` is kept in the signature so `stop_replay` can forward
-/// its own `AppHandle` here without an extra shim. No device-status
-/// event is emitted — `stop_stream` is always an intentional
-/// frontend-initiated teardown, so the caller already knows the
-/// stream ended (see the `DeviceStatus::disconnected_with` path in
-/// `on_disconnect` for the genuine-disconnect case).
+/// Tears down live and replay sessions alike. No device-status event is
+/// emitted — `stop_stream` is always an intentional frontend-initiated
+/// teardown, so the caller already knows the stream ended (see the
+/// `DeviceStatus::disconnected_with` path in the live reader's
+/// disconnect closure for the genuine-disconnect case).
 #[tauri::command]
-pub async fn stop_stream<R: Runtime>(
-    _app: AppHandle<R>,
-    state: State<'_, AppState>,
-) -> Result<(), RailError> {
+pub async fn stop_stream(state: State<'_, AppState>) -> Result<(), RailError> {
     // Cancel any running scanner before tearing down the session it depends on.
     // The mutex guard is a temporary of this statement, so it is released
     // before the await below (`clippy::await_holding_lock` enforces that).
@@ -761,7 +473,7 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         .invoke_handler(tauri::generate_handler![
             ping,
             check_device,
-            start_stream,
+            crate::ipc::session::live::start_stream,
             stop_stream,
             set_gain,
             available_gains,
@@ -785,31 +497,8 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             crate::ipc::capture_cmd::save_screenshot,
             crate::ipc::replay_cmd::open_replay,
             crate::ipc::replay_cmd::start_replay,
-            crate::ipc::replay_cmd::pause_replay,
-            crate::ipc::replay_cmd::resume_replay,
-            crate::ipc::replay_cmd::seek_replay,
-            crate::ipc::replay_cmd::stop_replay,
+            crate::ipc::replay_cmd::replay_transport,
             start_scan,
             stop_scan,
         ])
-}
-
-#[cfg(test)]
-mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-    use super::sample_rate_candidates;
-
-    #[test]
-    fn sample_rate_candidates_keep_requested_first() {
-        let c = sample_rate_candidates(2_400_000);
-        assert_eq!(c[0], 2_400_000);
-        assert!(c.contains(&2_048_000));
-    }
-
-    #[test]
-    fn sample_rate_candidates_dedup_requested_rate() {
-        let c = sample_rate_candidates(2_048_000);
-        let count = c.iter().filter(|&&hz| hz == 2_048_000).count();
-        assert_eq!(count, 1);
-    }
 }

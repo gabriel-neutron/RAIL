@@ -9,7 +9,18 @@ import {
 import { type SignalClassificationPayload } from "../ipc/events";
 import { useReplayStore } from "./replay";
 
-export type DemodMode = "FM" | "NFM" | "AM" | "USB" | "LSB" | "CW";
+/// Every demodulation mode the backend accepts, in selector order.
+/// Kept in sync with `parse_mode` in `src-tauri/src/ipc/commands.rs`.
+export const DEMOD_MODES = ["FM", "NFM", "AM", "USB", "LSB", "CW"] as const;
+
+export type DemodMode = (typeof DEMOD_MODES)[number];
+
+/// Narrow an untrusted mode string (SigMF metadata, bookmarks) to a
+/// `DemodMode`, or `null` when it is not one this build knows.
+export const parseDemodMode = (value: string): DemodMode | null =>
+  (DEMOD_MODES as readonly string[]).includes(value)
+    ? (value as DemodMode)
+    : null;
 
 export type FreqUnit = "Hz" | "kHz" | "MHz";
 
