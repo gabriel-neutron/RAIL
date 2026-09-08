@@ -20,7 +20,7 @@
 //! "dongle is physically attached" probe used by the UI on startup. Actual
 //! tuning/streaming requires [`RtlSdrDevice::open`] and therefore librtlsdr.
 
-use std::ffi::{c_void, CStr};
+use std::ffi::c_void;
 use std::ptr;
 
 use serde::Serialize;
@@ -97,15 +97,6 @@ pub fn check_device() -> Result<DeviceInfo, RailError> {
     Err(RailError::DeviceNotFound)
 }
 
-/// Return the number of RTL-SDR devices visible to librtlsdr (post-driver).
-/// Differs from [`check_device`]: this one requires the WinUSB/udev driver
-/// to be installed and will return 0 otherwise.
-pub fn librtlsdr_device_count() -> u32 {
-    // SAFETY: `rtlsdr_get_device_count` takes no arguments and is
-    // thread-safe per the librtlsdr source.
-    unsafe { ffi::rtlsdr_get_device_count() }
-}
-
 /// Safe RAII handle around a `librtlsdr` device.
 ///
 /// The raw pointer is moved to a single worker thread for streaming (see
@@ -134,19 +125,6 @@ impl RtlSdrDevice {
             )));
         }
         Ok(Self { ptr })
-    }
-
-    /// Human-readable device name for the given index.
-    pub fn device_name(index: u32) -> Option<String> {
-        // SAFETY: librtlsdr returns either NULL or a pointer to a static
-        // string living for the duration of the process.
-        let raw = unsafe { ffi::rtlsdr_get_device_name(index) };
-        if raw.is_null() {
-            return None;
-        }
-        // SAFETY: pointer is non-null and points to a NUL-terminated static.
-        let cstr = unsafe { CStr::from_ptr(raw) };
-        cstr.to_str().ok().map(str::to_owned)
     }
 
     /// Configure sample rate in Hz. See `docs/HARDWARE.md` §4 for stable
@@ -204,7 +182,8 @@ impl RtlSdrDevice {
     }
 
     /// Start the blocking async read loop. `cb` will be invoked on
-    /// librtlsdr's internal thread until [`Self::cancel_async`] is called.
+    /// librtlsdr's internal thread until [`stream::IqCanceler::cancel`] is
+    /// called.
     ///
     /// # Safety
     ///
@@ -227,22 +206,11 @@ impl RtlSdrDevice {
         Ok(())
     }
 
-    /// Signal the async loop to exit. Safe to call from any thread.
-    pub fn cancel_async(&self) -> Result<(), RailError> {
-        // SAFETY: librtlsdr documents `rtlsdr_cancel_async` as safe to call
-        // from a different thread than the one running `read_async`.
-        let rc = unsafe { ffi::rtlsdr_cancel_async(self.ptr) };
-        if rc != 0 {
-            return Err(RailError::StreamError(format!(
-                "rtlsdr_cancel_async -> {rc}"
-            )));
-        }
-        Ok(())
-    }
-
     /// Expose the raw pointer for `rtlsdr_cancel_async` to be called from a
     /// thread that only holds a weak reference. Only used by
-    /// [`stream::IqStream`].
+    /// [`stream::IqStream`]. librtlsdr documents `rtlsdr_cancel_async` as
+    /// safe to call from a thread other than the one running `read_async`,
+    /// which is what makes this hand-off sound.
     pub(crate) fn as_ptr(&self) -> *mut ffi::RtlSdrDev {
         self.ptr
     }

@@ -4,12 +4,9 @@
 //! `AUDIO_RATE_HZ` (44.1 kHz) to disk. See `docs/SIGNALS.md` §2: audio
 //! recordings are WAV, not SigMF (SigMF is for raw IQ only).
 //!
-//! Two flavours:
-//! - [`write_mono_f32`]: one-shot writer, used by tests.
-//! - [`WavStreamWriter`]: streaming writer with a placeholder header
-//!   that gets patched on `finalize`. The DSP task appends chunks
-//!   whenever the demod emits them; stop may happen seconds or hours
-//!   later.
+//! [`WavStreamWriter`] is a streaming writer with a placeholder header
+//! that gets patched on `finalize`. The DSP task appends chunks whenever
+//! the demod emits them; stop may happen seconds or hours later.
 //!
 //! Web Audio's `decodeAudioData` consumes this layout natively.
 
@@ -24,41 +21,6 @@ const WAVE_FORMAT_IEEE_FLOAT: u16 = 3;
 const BITS_PER_SAMPLE: u16 = 32;
 const BYTES_PER_SAMPLE: u32 = 4;
 const FMT_CHUNK_SIZE: u32 = 16;
-
-/// Write `samples` (mono, f32) to `path` as a WAV file at `sample_rate_hz`.
-///
-/// The file is written in full before `rename`-ing into place so a
-/// crash mid-write cannot leave a truncated artifact.
-pub fn write_mono_f32<P: AsRef<Path>>(
-    path: P,
-    samples: &[f32],
-    sample_rate_hz: u32,
-) -> Result<(), RailError> {
-    let path = path.as_ref();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| RailError::CaptureError(format!("wav dir: {e}")))?;
-    }
-    let tmp = path.with_extension("wav.tmp");
-    {
-        let file =
-            File::create(&tmp).map_err(|e| RailError::CaptureError(format!("wav create: {e}")))?;
-        let mut w = BufWriter::new(file);
-        let header = build_header(samples.len() as u32, sample_rate_hz);
-        w.write_all(&header)
-            .map_err(|e| RailError::CaptureError(format!("wav header: {e}")))?;
-        for &s in samples {
-            w.write_all(&s.to_le_bytes())
-                .map_err(|e| RailError::CaptureError(format!("wav sample: {e}")))?;
-        }
-        w.flush()
-            .map_err(|e| RailError::CaptureError(format!("wav flush: {e}")))?;
-        w.get_ref()
-            .sync_all()
-            .map_err(|e| RailError::CaptureError(format!("wav sync: {e}")))?;
-    }
-    std::fs::rename(&tmp, path).map_err(|e| RailError::CaptureError(format!("wav rename: {e}")))
-}
 
 fn build_header(sample_count: u32, sample_rate_hz: u32) -> [u8; 44] {
     let channels: u16 = 1;
@@ -173,10 +135,6 @@ impl WavStreamWriter {
     pub fn sample_rate_hz(&self) -> u32 {
         self.sample_rate_hz
     }
-
-    pub fn samples_written(&self) -> u64 {
-        self.samples_written
-    }
 }
 
 #[cfg(test)]
@@ -202,7 +160,9 @@ mod tests {
     fn header_fields_match_spec() {
         let path = tmp("header");
         let samples = [0.0_f32, 0.5, -0.5, 1.0];
-        write_mono_f32(&path, &samples, 44_100).unwrap();
+        let mut w = WavStreamWriter::create(&path, 44_100).unwrap();
+        w.append(&samples).unwrap();
+        assert_eq!(w.finalize().unwrap(), 4);
 
         let mut file = File::open(&path).unwrap();
         let mut bytes = Vec::new();

@@ -119,52 +119,6 @@ impl FirFilter {
     }
 }
 
-/// Integer decimator for real f32 streams: FIR low-pass then keep one
-/// out of every `m` samples. Output length is `(in_len + phase) / m`.
-pub struct FirDecimatorReal {
-    taps: Vec<f32>,
-    delay: Vec<f32>,
-    head: usize,
-    m: usize,
-    phase: usize,
-}
-
-impl FirDecimatorReal {
-    pub fn new(taps: Vec<f32>, m: usize) -> Self {
-        assert!(m >= 1, "decimation factor must be >= 1");
-        let len = taps.len().max(1);
-        Self {
-            taps,
-            delay: vec![0.0; len],
-            head: 0,
-            m,
-            phase: 0,
-        }
-    }
-
-    /// Feed `input`, append decimated outputs to `out`.
-    pub fn process(&mut self, input: &[f32], out: &mut Vec<f32>) {
-        let n = self.taps.len();
-        for &x in input {
-            self.delay[self.head] = x;
-            self.head = (self.head + 1) % n;
-
-            self.phase += 1;
-            if self.phase == self.m {
-                self.phase = 0;
-                let mut acc = 0.0_f32;
-                // Most recent sample is at head-1.
-                let mut idx = if self.head == 0 { n - 1 } else { self.head - 1 };
-                for &t in self.taps.iter() {
-                    acc += t * self.delay[idx];
-                    idx = if idx == 0 { n - 1 } else { idx - 1 };
-                }
-                out.push(acc);
-            }
-        }
-    }
-}
-
 /// Integer decimator for complex f32 streams — anti-alias FIR then
 /// keep one of every `m` complex samples.
 pub struct FirDecimatorComplex {
@@ -186,23 +140,6 @@ impl FirDecimatorComplex {
             m,
             phase: 0,
         }
-    }
-
-    /// Replace taps in place — used when the channel bandwidth changes.
-    /// Delay line is preserved to avoid a click on every retune.
-    pub fn set_taps(&mut self, taps: Vec<f32>) {
-        let new_len = taps.len().max(1);
-        if new_len != self.delay.len() {
-            self.delay = vec![Complex::new(0.0, 0.0); new_len];
-            self.head = 0;
-            self.phase = 0;
-        }
-        self.taps = taps;
-    }
-
-    /// Decimation factor (output rate = input rate / m).
-    pub fn factor(&self) -> usize {
-        self.m
     }
 
     /// Feed `input`, append decimated outputs to `out`.
@@ -558,16 +495,6 @@ mod tests {
             last = f.step(1.0);
         }
         assert!((last - 1.0).abs() < 1e-3, "DC steady state = {last}");
-    }
-
-    #[test]
-    fn fir_decimator_real_output_length() {
-        let taps = sinc_lowpass_taps(5_000.0, 48_000.0, 33);
-        let mut d = FirDecimatorReal::new(taps, 4);
-        let input = vec![1.0_f32; 1024];
-        let mut out = Vec::new();
-        d.process(&input, &mut out);
-        assert_eq!(out.len(), 1024 / 4);
     }
 
     #[test]

@@ -6,8 +6,8 @@
 //!
 //! # DC offset mitigation
 //!
-//! When enabled (see [`FrameBuilder::set_lo_offset_enabled`]), the builder
-//! applies an `exp(-j·π·n/2)` mixer before the FFT. Paired with an LO that
+//! The DSP task applies an `exp(-j·π·n/2)` mixer (see [`apply_fs4_shift`])
+//! before the FFT. Paired with an LO that
 //! is parked `fs/4` above the target frequency, this shifts the signal of
 //! interest down to 0 Hz (canvas center) while the hardware DC spike ends
 //! up at `-fs/4` — off the center bin. See `docs/DSP.md` §1 and §8.
@@ -70,58 +70,27 @@ pub fn apply_fs4_shift(samples: &mut [Complex<f32>], phase_idx: u32) -> u32 {
 /// size and produces a full waterfall row per call.
 pub struct FrameBuilder {
     fft: FftProcessor,
-    iq: Vec<Complex<f32>>,
-    lo_offset_enabled: bool,
-    phase_idx: u32,
+    n: usize,
 }
 
 impl FrameBuilder {
-    /// Allocate a frame builder for FFT size `n`. The `fs/4` LO-offset
-    /// mixer is enabled by default.
+    /// Allocate a frame builder for FFT size `n`.
     pub fn new(n: usize) -> Self {
         Self {
             fft: FftProcessor::new(n),
-            iq: vec![Complex::new(0.0, 0.0); n],
-            lo_offset_enabled: true,
-            phase_idx: 0,
+            n,
         }
-    }
-
-    /// Number of complex samples (and output bins) per frame.
-    pub fn size(&self) -> usize {
-        self.fft.size()
-    }
-
-    /// Required raw-byte slice length per frame (2 × N for interleaved IQ).
-    pub fn bytes_per_frame(&self) -> usize {
-        self.fft.size() * 2
-    }
-
-    /// Toggle the `fs/4` digital mixer. Disabling is intended for tests
-    /// and for hardware that handles the DC offset itself.
-    pub fn set_lo_offset_enabled(&mut self, enabled: bool) {
-        self.lo_offset_enabled = enabled;
-    }
-
-    /// Convert one chunk of raw IQ bytes into a dB-scale, FFT-shifted
-    /// spectrum. Returns a slice of length `size()`.
-    pub fn build(&mut self, raw: &[u8]) -> Result<&[f32], RailError> {
-        iq_u8_to_complex(raw, &mut self.iq)?;
-        if self.lo_offset_enabled {
-            self.phase_idx = apply_fs4_shift(&mut self.iq, self.phase_idx);
-        }
-        Ok(self.fft.process(&self.iq))
     }
 
     /// Run only the FFT stage on IQ samples that were already converted
     /// and (if needed) `fs/4`-shifted upstream. Lets the DSP task share
     /// one shifted buffer between the waterfall and demod chains.
     pub fn process_shifted(&mut self, iq: &[Complex<f32>]) -> Result<&[f32], RailError> {
-        if iq.len() != self.iq.len() {
+        if iq.len() != self.n {
             return Err(RailError::DspError(format!(
                 "FFT input length mismatch: {} vs {}",
                 iq.len(),
-                self.iq.len()
+                self.n
             )));
         }
         Ok(self.fft.process(iq))
@@ -145,12 +114,10 @@ mod tests {
     }
 
     #[test]
-    fn frame_builder_round_trip() {
+    fn process_shifted_rejects_length_mismatch() {
         let mut fb = FrameBuilder::new(32);
-        fb.set_lo_offset_enabled(false);
-        let raw = vec![128u8; fb.bytes_per_frame()];
-        let frame = fb.build(&raw).unwrap();
-        assert_eq!(frame.len(), 32);
+        let short = vec![Complex::new(0.0_f32, 0.0); 16];
+        assert!(fb.process_shifted(&short).is_err());
     }
 
     #[test]

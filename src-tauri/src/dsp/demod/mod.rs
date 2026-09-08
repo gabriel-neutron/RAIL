@@ -153,11 +153,6 @@ impl DemodChain {
         }
     }
 
-    /// Nominal audio sample rate (Hz).
-    pub fn audio_rate_hz(&self) -> f32 {
-        self.audio_rate_hz
-    }
-
     /// Current chain configuration (mode, bandwidth, squelch).
     pub fn config(&self) -> DemodConfig {
         self.config
@@ -176,7 +171,6 @@ impl DemodChain {
             DemodControl::SetBandwidthHz(bw) => {
                 if (self.config.bandwidth_hz - bw).abs() > 0.5 {
                     self.config.bandwidth_hz = bw;
-                    self.reconfigure_channel();
                     // Changing bandwidth also flips wbfm/deviation for
                     // FM (e.g. 200 kHz → 15 kHz narrows to NBFM).
                     self.reconfigure_mode();
@@ -186,13 +180,6 @@ impl DemodChain {
                 self.config.squelch_dbfs = db;
             }
         }
-    }
-
-    fn reconfigure_channel(&mut self) {
-        let cutoff = channel_cutoff_for(self.config.bandwidth_hz, self.baseband_rate_hz);
-        let (_, _, wbfm) = mode_params(self.config.mode, self.config.bandwidth_hz);
-        self.decim = build_decim(self.input_rate_hz, self.baseband_rate_hz, cutoff);
-        self.wbfm = wbfm;
     }
 
     fn reconfigure_mode(&mut self) {
@@ -642,6 +629,38 @@ mod tests {
         assert!(
             (delta - 6.0).abs() < 0.5,
             "expected ~6 dB jump, got {delta} (weak={rms_weak}, strong={rms_strong})"
+        );
+    }
+
+    #[test]
+    fn chain_mode_switch_preserves_audio_output_rate() {
+        // Switching mode crosses the FM/AM (256 kHz) to SSB (16 kHz)
+        // baseband boundary, so the channel decimator must be rebuilt.
+        // A stale factor would feed the SSB stage at 16x rate and the
+        // audio length would come out ~16x too long.
+        let fs = 2_048_000.0_f32;
+        let n = 20_480;
+        let iq: Vec<Complex<f32>> = (0..n)
+            .map(|k| {
+                let phase = 2.0 * PI * 5_000.0 * k as f32 / fs;
+                Complex::new(0.5 * phase.cos(), 0.5 * phase.sin())
+            })
+            .collect();
+
+        let mut chain = DemodChain::new(fs);
+        let mut audio = Vec::new();
+        chain.process(&iq, &mut audio);
+        audio.clear();
+
+        chain.apply(DemodControl::SetMode(DemodMode::Usb));
+        chain.process(&iq, &mut audio);
+
+        let expected = (n as f32 * AUDIO_RATE_HZ / fs).round() as i32; // 441
+        let delta = (audio.len() as i32 - expected).abs();
+        assert!(
+            delta <= 2,
+            "expected ~{expected} audio samples after mode switch, got {}",
+            audio.len()
         );
     }
 }

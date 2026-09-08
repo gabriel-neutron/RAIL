@@ -195,10 +195,6 @@ impl SigMfStreamWriter {
     pub fn meta_path(&self) -> &Path {
         &self.meta_path
     }
-
-    pub fn samples_written(&self) -> u64 {
-        self.samples_written
-    }
 }
 
 #[cfg(test)]
