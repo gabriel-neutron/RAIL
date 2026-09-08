@@ -60,8 +60,12 @@ pub fn set_center_freq(dev: &Device, freq_hz: u32) -> Result<(), RailError> {
 - Two stylesheets, imported in this order by `App.tsx`:
   `App.css` is layout and structure, `src/theme.css` is the visual identity
   (colour, type, spacing). The skin loads second so it wins.
-- Never put a colour or font in `App.css`. A second palette there is how the
-  previous one went stale unnoticed.
+- `src/theme.css` is the only source of the palette. Add no new colour, font
+  or font-size to `App.css` — a second palette there is how the previous one
+  went stale unnoticed.
+- `App.css` does not yet meet that bar: 274 colour/font declarations remain,
+  most of them dead weight the theme already overrides. Converging it is
+  tracked in #12. Until then the rule is "add none", not "there are none".
 - The palette rationale, its measured contrast ratios and the rules that keep
   them (fills vs marks vs edges, the 24px target floor, the tracking ceiling)
   live in the `theme.css` header comment — not duplicated here.
