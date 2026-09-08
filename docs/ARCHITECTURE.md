@@ -95,6 +95,13 @@ a command whose handler takes a `#[derive(Deserialize)]` args struct is
 passed a single `{ args }` object, and a parameterless command is passed
 nothing. Sibling `Channel` handles ride alongside `args`, not inside it.
 
+The port also mints those channels (`createChannel(onMessage)`), which is
+why `startScan(args, onFrame)` takes a frame callback rather than a
+channel: the handler is bound at construction, so no frame can land
+before something is listening. The scan session that consumes those
+frames lives in `store/scanner.ts` (`runScanSession` / `cancelScanSession`),
+the single place the scan wire format is decoded.
+
 ---
 
 ## 3. Tauri IPC contract
@@ -119,7 +126,7 @@ RAIL uses two distinct IPC surfaces: **named JSON events** (low-rate status and 
 | Capture | `start/stopAudioCapture`, `start/stopIqCapture`, `finalizeCapture`, `finalizeIqCapture`, `discardCapture` | Stage-then-finalize file I/O |
 | Screenshot | `screenshotSuggestion`, `saveScreenshot` | Suggest filename, atomic PNG write |
 | Replay | `openReplay`, `startReplay`, `replayTransport({kind})` | Transport for SigMF captures (incl. [`docs/assets/demo_iq.sigmf-data`](assets/demo_iq.sigmf-data)); `kind` is `play` / `pause` / `seek`. Teardown goes through `stopStream` |
-| Scanner | `startScan(args, scanCh)`, `stopScan()` | Sequential frequency sweep; `startScan` returns ordered `frequenciesHz[]`; one f32 per step on `scanCh` |
+| Scanner | `startScan(args, onFrame)`, `stopScan()` | Sequential frequency sweep; `startScan` returns ordered `frequenciesHz[]`; one f32 per step on `scanCh` |
 
 ### 3.2 Named events (Rust → React, JSON)
 
@@ -144,7 +151,7 @@ High-rate frames travel on `tauri::ipc::Channel<InvokeResponseBody>` opened by t
 
 - **`waterfallChannel`** (`start_stream`, `start_replay`): `FFT_SIZE × 4 = 32768` bytes of little-endian `f32` magnitude (dB), at ≤ 25 fps.
 - **`audioChannel`** (same): `AUDIO_CHUNK_SAMPLES × 4 ≈ 7 KB` of mono `f32` PCM at 44.1 kHz.
-- **`scanChannel`** (`start_scan`): two little-endian `f32` (8 bytes) per frequency step — `signal_avg_db` (average power in the target channel window) then `noise_floor_db` (median of the full spectrum); the frontend takes the difference as SNR. Exactly one message per frequency, including steps whose retune failed (both fields `-inf`), so step order matches `frequenciesHz[]` from the command reply.
+- **`scanChannel`** (`start_scan`): two little-endian `f32` (8 bytes) per frequency step — `signal_avg_db` (average power in the target channel window) then `noise_floor_db` (median of the full spectrum); the frontend takes the difference as SNR. Exactly one message per frequency, including steps whose retune failed (both fields `-inf`), so step order matches `frequenciesHz[]` from the command reply. Frames are positional only — they carry no step index — so the frontend buffers any frame that arrives before `start_scan` resolves and drains it in order once `frequenciesHz[]` is known; dropping an early frame would shear every later result by one step.
 
 Rust sends `InvokeResponseBody::Raw(Vec<u8>)`; the frontend receives an `ArrayBuffer` and wraps it with `new Float32Array(buffer)` (see [`src/hooks/useWaterfall.ts`](../src/hooks/useWaterfall.ts) and [`src/hooks/useAudio.ts`](../src/hooks/useAudio.ts)).
 

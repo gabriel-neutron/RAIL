@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Channel } from "@tauri-apps/api/core";
-import { startScan, stopScan } from "../../ipc/commands";
 import {
   subscribeScanComplete,
   subscribeScanStep,
@@ -17,10 +15,10 @@ export const Scanner = () => {
   const scanning = useScannerStore((s) => s.scanning);
   const frequenciesHz = useScannerStore((s) => s.frequenciesHz);
   const results = useScannerStore((s) => s.results);
-  const beginScan = useScannerStore((s) => s.beginScan);
   const endScan = useScannerStore((s) => s.endScan);
   const scanConfig = useScannerStore((s) => s.scanConfig);
-  const scanConfigSeq = useScannerStore((s) => s.scanConfigSeq);
+  const runScanSession = useScannerStore((s) => s.runScanSession);
+  const cancelScanSession = useScannerStore((s) => s.cancelScanSession);
 
   const [startMhz, setStartMhz] = useState(() =>
     (scanConfig.startHz / 1e6).toFixed(1),
@@ -39,11 +37,12 @@ export const Scanner = () => {
   const [selectedIdx, setSelectedIdx] = useState(-1);
 
   // When a band-menu click pushes new config, sync the form fields.
-  // scanConfigSeq changes only on external setScanConfig calls, not on
-  // user edits, so this never fights with in-progress typing.
-  const [prevScanConfigSeq, setPrevScanConfigSeq] = useState(scanConfigSeq);
-  if (scanConfigSeq !== prevScanConfigSeq) {
-    setPrevScanConfigSeq(scanConfigSeq);
+  // Object identity is the signal: only setScanConfig replaces the
+  // object, and it must keep allocating a fresh one. User typing lives
+  // in local state, so this never fights with an edit in progress.
+  const [prevScanConfig, setPrevScanConfig] = useState(scanConfig);
+  if (scanConfig !== prevScanConfig) {
+    setPrevScanConfig(scanConfig);
     setStartMhz((scanConfig.startHz / 1e6).toFixed(1));
     setStopMhz((scanConfig.stopHz / 1e6).toFixed(1));
     setStepKhz(String(Math.round(scanConfig.stepHz / 1e3)));
@@ -73,13 +72,6 @@ export const Scanner = () => {
     selectedIdx >= 0 && selectedIdx < detectedSignals.length
       ? detectedSignals[selectedIdx].frequencyHz
       : undefined;
-
-  const channelRef = useRef<Channel<ArrayBuffer> | null>(null);
-  const freqsRef = useRef<number[]>([]);
-
-  useEffect(() => {
-    freqsRef.current = frequenciesHz;
-  }, [frequenciesHz]);
 
   // Subscribe to all scanner events.
   useEffect(() => {
@@ -153,44 +145,21 @@ export const Scanner = () => {
     }
 
     setSelectedIdx(-1);
-    const channel = new Channel<ArrayBuffer>();
-    channelRef.current = channel;
-
-    channel.onmessage = (buffer: ArrayBuffer) => {
-      const view = new DataView(buffer);
-      const signalAvgDb = view.getFloat32(0, true);
-      const noiseFloorDb = view.getFloat32(4, true);
-      const freqs = freqsRef.current;
-      const idx = useScannerStore.getState().results.length;
-      if (idx < freqs.length) {
-        useScannerStore
-          .getState()
-          .pushResult({ frequencyHz: freqs[idx], signalAvgDb, noiseFloorDb });
-      }
-    };
-
-    try {
-      setStatusText("Starting…");
-      const reply = await startScan(
-        { startHz, stopHz, stepHz, dwellMs: dwell, squelchSnrDb: null },
-        channel,
-      );
-      beginScan(reply.frequenciesHz);
-      setStatusText("Scanning…");
-    } catch (err) {
-      setStatusText(`Error: ${String(err)}`);
-    }
-  }, [startMhz, stopMhz, stepKhz, dwellMs, beginScan]);
+    setStatusText("Starting…");
+    const outcome = await runScanSession({
+      startHz,
+      stopHz,
+      stepHz,
+      dwellMs: dwell,
+      squelchSnrDb: null,
+    });
+    setStatusText(outcome.ok ? "Scanning…" : `Error: ${outcome.message}`);
+  }, [startMhz, stopMhz, stepKhz, dwellMs, runScanSession]);
 
   const handleStop = useCallback(async () => {
-    try {
-      await stopScan();
-    } catch (err) {
-      console.warn("[RAIL] stopScan failed:", err);
-    }
-    endScan();
+    await cancelScanSession();
     setStatusText("Stopped");
-  }, [endScan]);
+  }, [cancelScanSession]);
 
   const handleTune = useCallback(
     (frequencyHz: number) => {

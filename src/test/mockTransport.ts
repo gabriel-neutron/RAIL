@@ -3,6 +3,7 @@
 // fails loudly instead of reaching a runtime that is not there.
 
 import type {
+  IpcChannel,
   IpcTransport,
   OpenPathOptions,
   SavePathOptions,
@@ -16,6 +17,11 @@ export type RecordedInvoke = {
 export type MockTransport = IpcTransport & {
   /// Every `invoke` in call order.
   calls: RecordedInvoke[];
+  /// Every channel minted by `createChannel`, in creation order.
+  channels: IpcChannel<unknown>[];
+  /// Deliver `message` to the channel minted at `index`, as the host
+  /// would. Throws when no such channel exists.
+  emit: (index: number, message: unknown) => void;
   /// Payload of the single call to `command`; throws when the count is
   /// not exactly one, so a silent extra dispatch cannot pass unnoticed.
   payloadOf: (command: string) => Record<string, unknown> | undefined;
@@ -36,6 +42,7 @@ export const createMockTransport = (): MockTransport => {
 
   const mock: MockTransport = {
     calls: [],
+    channels: [],
     openCalls: [],
     saveCalls: [],
     nextOpenPath: null,
@@ -49,6 +56,20 @@ export const createMockTransport = (): MockTransport => {
       const failure = failures.get(command);
       if (failure) return Promise.reject(failure);
       return Promise.resolve(replies.get(command) as T);
+    },
+
+    createChannel: <T,>(onMessage: (message: T) => void): IpcChannel<T> => {
+      const channel: IpcChannel<T> = { onmessage: onMessage };
+      mock.channels.push(channel as IpcChannel<unknown>);
+      return channel;
+    },
+
+    emit: (index: number, message: unknown) => {
+      const channel = mock.channels[index];
+      if (!channel) {
+        throw new Error(`[RAIL test] no channel at index ${index}`);
+      }
+      channel.onmessage(message);
     },
 
     pickOpenPath: (options: OpenPathOptions) => {

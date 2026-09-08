@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Channel } from "@tauri-apps/api/core";
 
 import type { Bookmark } from "../../ipc/commands";
-import { startScan } from "../../ipc/commands";
 import { BAND_ENTRIES } from "../../data/bands";
 import { useBookmarksStore } from "../../store/bookmarks";
 import { useCaptureStore } from "../../store/capture";
@@ -214,25 +212,15 @@ export const MenuBar = () => {
       thresholdSnrDb: 10,
     });
     if (!scannerStore.visible) scannerStore.toggleVisible();
-    const channel = new Channel<ArrayBuffer>();
-    try {
-      const reply = await startScan(
-        { startHz, stopHz, stepHz: 200_000, dwellMs: 200, squelchSnrDb: null },
-        channel,
-      );
-      useScannerStore.getState().beginScan(reply.frequenciesHz);
-      const freqs = reply.frequenciesHz;
-      channel.onmessage = (buffer: ArrayBuffer) => {
-        const view = new DataView(buffer);
-        const signalAvgDb = view.getFloat32(0, true);
-        const noiseFloorDb = view.getFloat32(4, true);
-        const idx = useScannerStore.getState().results.length;
-        if (idx < freqs.length) {
-          useScannerStore.getState().pushResult({ frequencyHz: freqs[idx], signalAvgDb, noiseFloorDb });
-        }
-      };
-    } catch (err) {
-      console.warn("[RAIL] band scan failed:", err);
+    const outcome = await scannerStore.runScanSession({
+      startHz,
+      stopHz,
+      stepHz: 200_000,
+      dwellMs: 200,
+      squelchSnrDb: null,
+    });
+    if (!outcome.ok) {
+      console.warn("[RAIL] band scan failed:", outcome.message);
     }
   };
 

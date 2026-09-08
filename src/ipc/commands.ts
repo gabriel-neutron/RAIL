@@ -256,11 +256,17 @@ export type ScanStartReply = {
   frequenciesHz: number[];
 };
 
+/// `onFrame` receives one 8-byte frame per frequency step; the port
+/// mints the channel so no caller has to touch the Tauri runtime.
+/// Decoding lives in `store/scanner.ts`.
 export const startScan = (
   args: StartScanArgs,
-  scanChannel: Channel<ArrayBuffer>,
+  onFrame: (buffer: ArrayBuffer) => void,
 ): Promise<ScanStartReply> =>
-  transport().invoke<ScanStartReply>("start_scan", { args, scanChannel });
+  transport().invoke<ScanStartReply>("start_scan", {
+    args,
+    scanChannel: transport().createChannel<ArrayBuffer>(onFrame),
+  });
 
 export const stopScan = (): Promise<void> =>
   transport().invoke<void>("stop_scan");

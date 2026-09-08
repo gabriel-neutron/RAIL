@@ -20,10 +20,22 @@ export type SavePathOptions = {
   defaultPath?: string;
 };
 
+/// A binary stream handle passed alongside a command's `args`.
+/// Structurally the subset of Tauri's `Channel` the frontend uses, so
+/// nothing outside `tauriTransport.ts` names the runtime type.
+export type IpcChannel<T> = {
+  onmessage: (message: T) => void;
+};
+
 /// Everything the frontend needs from the host. `invoke` carries the
-/// commands, the two pickers carry the native dialogs.
+/// commands, `createChannel` mints the binary streams, the two pickers
+/// carry the native dialogs.
 export type IpcTransport = {
   invoke<T>(command: string, payload?: Record<string, unknown>): Promise<T>;
+  /// Mint a channel already wired to its handler. Taking `onMessage` at
+  /// construction is deliberate: a channel cannot exist in a state where
+  /// the host could deliver a frame before anything is listening.
+  createChannel<T>(onMessage: (message: T) => void): IpcChannel<T>;
   /// Resolves to `null` when the user cancels.
   pickOpenPath(options: OpenPathOptions): Promise<string | null>;
   /// Resolves to `null` when the user cancels.
