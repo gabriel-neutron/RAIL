@@ -14,6 +14,7 @@ use crate::hardware::stream::{IqStream, DEFAULT_USB_BUF_LEN, DEFAULT_USB_BUF_NUM
 use crate::hardware::{RtlSdrDevice, Tuner};
 use crate::ipc::control::RadioParams;
 use crate::ipc::dsp_task::{AUDIO_CHUNK_SAMPLES, FFT_SIZE};
+use crate::ipc::event_contract::Emit;
 use crate::ipc::events::DeviceStatus;
 use crate::ipc::session::start::{ensure_idle, start_session, ScanAccumulator, SessionPlan};
 use crate::ipc::session::types::{AppState, LiveBits, SessionSource};

@@ -1,0 +1,119 @@
+{
+  "EVENT_DEVICE_STATUS": {
+    "name": "device-status",
+    "type": "DeviceStatus",
+    "doc": ["Payload for the `device-status` JSON event."],
+    "fields": [
+      { "name": "connected", "type": "bool", "doc": ["True while the tuner is open and streaming."] },
+      {
+        "name": "error",
+        "type": "string",
+        "optional": true,
+        "doc": ["Reason for the disconnect; absent from the wire when there is none."]
+      }
+    ]
+  },
+  "EVENT_REPLAY_POSITION": {
+    "name": "replay-position",
+    "type": "ReplayPosition",
+    "doc": [
+      "Payload for the `replay-position` JSON event. Emitted at ~25 Hz",
+      "by the replay reader so the transport slider stays in sync with",
+      "the IQ file read head (see [`crate::replay`])."
+    ],
+    "fields": [
+      { "name": "sample_idx", "type": "u64", "doc": ["Read-head offset in IQ samples from the start of the file."] },
+      { "name": "position_ms", "type": "u64", "doc": ["Read-head position in milliseconds."] },
+      { "name": "total_ms", "type": "u64", "doc": ["Total capture duration in milliseconds."] },
+      { "name": "playing", "type": "bool", "doc": ["True while the transport is running, false when paused."] }
+    ]
+  },
+  "EVENT_SCAN_COMPLETE": {
+    "name": "scan-complete",
+    "type": "ScanComplete",
+    "doc": [
+      "Payload for the `scan-complete` JSON event. Emitted when a full sweep",
+      "finishes without hitting the squelch threshold (see `docs/TIMELINE.md` Phase 9)."
+    ],
+    "fields": []
+  },
+  "EVENT_SCAN_STEP": {
+    "name": "scan-step",
+    "type": "ScanStep",
+    "doc": [
+      "Payload for the `scan-step` JSON event. Emitted after each successful",
+      "retune so the frontend can keep `radioStore.frequencyHz` in sync with",
+      "the hardware. All display components (FrequencyAxis, FilterBandMarker,",
+      "FrequencyControl) read from that store and update automatically."
+    ],
+    "fields": [
+      {
+        "name": "frequency_hz",
+        "type": "u32",
+        "doc": [
+          "The logical target frequency (Hz) — after lo-offset correction,",
+          "matching what the user sees as the tuned centre."
+        ]
+      }
+    ]
+  },
+  "EVENT_SCAN_STOPPED": {
+    "name": "scan-stopped",
+    "type": "ScanStopped",
+    "doc": [
+      "Payload for the `scan-stopped` JSON event. Emitted when the scanner",
+      "halts early because a step's peak power exceeded the squelch threshold."
+    ],
+    "fields": [
+      { "name": "frequency_hz", "type": "u32", "doc": ["The frequency (Hz) at which the signal was detected."] }
+    ]
+  },
+  "EVENT_SIGNAL_CLASSIFICATION": {
+    "name": "signal-classification",
+    "type": "SignalClassification",
+    "doc": [
+      "Payload for the `signal-classification` JSON event.",
+      "",
+      "Emitted at ~2 Hz by the DSP task. See `docs/SIGNALS.md §5.4`."
+    ],
+    "fields": [
+      {
+        "name": "confirmed",
+        "type": "str_static",
+        "nullable": true,
+        "doc": [
+          "Wire-name of the spectrally confirmed mode (`\"FM\"` / `\"NFM\"` /",
+          "`\"AM\"` / `\"USB\"` / `\"LSB\"` / `\"CW\"`), or null when SNR is too",
+          "low. Maps to a green ModeSelector button."
+        ]
+      },
+      {
+        "name": "candidates",
+        "type": "str_static",
+        "list": true,
+        "doc": [
+          "Wire-names from the frequency prior; always populated for known",
+          "bands regardless of signal strength. Map to yellow buttons."
+        ]
+      },
+      { "name": "reason", "type": "string", "doc": ["Human-readable explanation of the decision."] }
+    ]
+  },
+  "EVENT_SIGNAL_LEVEL": {
+    "name": "signal-level",
+    "type": "SignalLevel",
+    "doc": [
+      "Payload for the `signal-level` JSON event. Emitted at ≤ 25 Hz,",
+      "rate-limited with peak decay (see `MIN_LEVEL_EMIT_INTERVAL` in",
+      "`src-tauri/src/ipc/dsp_task.rs`)."
+    ],
+    "fields": [
+      {
+        "name": "current",
+        "type": "f32",
+        "doc": ["Instantaneous level in dBFS (post-channel-filter baseband RMS; see `docs/DSP.md` §2)."]
+      },
+      { "name": "peak", "type": "f32", "doc": ["Decaying peak-hold level in dBFS."] }
+    ]
+  }
+}

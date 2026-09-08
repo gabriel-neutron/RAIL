@@ -1,9 +1,0 @@
-{
-  "EVENT_DEVICE_STATUS": "device-status",
-  "EVENT_REPLAY_POSITION": "replay-position",
-  "EVENT_SCAN_COMPLETE": "scan-complete",
-  "EVENT_SCAN_STEP": "scan-step",
-  "EVENT_SCAN_STOPPED": "scan-stopped",
-  "EVENT_SIGNAL_CLASSIFICATION": "signal-classification",
-  "EVENT_SIGNAL_LEVEL": "signal-level"
-}

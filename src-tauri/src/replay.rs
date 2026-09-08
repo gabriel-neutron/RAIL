@@ -26,6 +26,7 @@ use crate::error::RailError;
 use crate::ipc::commands::parse_mode;
 use crate::ipc::control::RadioParams;
 use crate::ipc::dsp_task::FFT_SIZE;
+use crate::ipc::event_contract::Emit;
 use crate::ipc::events::ReplayPosition;
 
 /// Bytes per cf32 sample on disk (I f32 + Q f32, little-endian).

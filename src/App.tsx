@@ -6,12 +6,13 @@ import {
   type DeviceInfo,
 } from "./ipc/commands";
 import { isRailError } from "./ipc/errors";
+import { subscribeIpcEvent } from "./ipc/events";
 import {
-  subscribeDeviceStatus,
-  subscribeReplayPosition,
-  subscribeSignalClassification,
-  subscribeSignalLevel,
-} from "./ipc/events";
+  EVENT_DEVICE_STATUS,
+  EVENT_REPLAY_POSITION,
+  EVENT_SIGNAL_CLASSIFICATION,
+  EVENT_SIGNAL_LEVEL,
+} from "./ipc/generated/events";
 import AudioControls from "./components/AudioControls";
 import FilterControl from "./components/FilterControl";
 import FrequencyControl from "./components/FrequencyControl";
@@ -136,7 +137,7 @@ function App() {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
 
-    void subscribeDeviceStatus((payload) => {
+    void subscribeIpcEvent(EVENT_DEVICE_STATUS, (payload) => {
       if (payload.connected) return;
       console.warn("[RAIL] device disconnected mid-stream:", payload.error);
       stopStream().catch((err) => {
@@ -168,7 +169,7 @@ function App() {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
 
-    void subscribeSignalLevel((payload) => {
+    void subscribeIpcEvent(EVENT_SIGNAL_LEVEL, (payload) => {
       useRadioStore.getState().setSignalLevel({
         currentDbfs: payload.current,
         peakDbfs: payload.peak,
@@ -200,7 +201,7 @@ function App() {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
 
-    void subscribeSignalClassification((payload) => {
+    void subscribeIpcEvent(EVENT_SIGNAL_CLASSIFICATION, (payload) => {
       const store = useRadioStore.getState();
       if (!store.classifierEnabled) return;
       store.setClassification(payload);
@@ -226,7 +227,7 @@ function App() {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
 
-    void subscribeReplayPosition((payload) => {
+    void subscribeIpcEvent(EVENT_REPLAY_POSITION, (payload) => {
       useReplayStore
         .getState()
         .applyPosition(payload.positionMs, payload.playing);

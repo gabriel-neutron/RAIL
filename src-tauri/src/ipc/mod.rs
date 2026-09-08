@@ -8,6 +8,7 @@
 //! readable.
 
 pub mod commands;
+pub mod event_contract;
 pub mod events;
 pub mod session;
 

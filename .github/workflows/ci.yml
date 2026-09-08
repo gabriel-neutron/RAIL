@@ -34,13 +34,13 @@ jobs:
         with:
           node-version-file: '.nvmrc'
 
-      - name: Regenerate IPC event names
-        run: node scripts/gen-ipc-event-names.mjs
+      - name: Regenerate the IPC event contract
+        run: node scripts/gen-ipc-events.mjs
 
       - name: Fail if the committed output is stale
         run: |
-          if ! git diff --exit-code -- src/ipc/generated; then
-            echo "::error::src/ipc/generated is out of date with shared/ipc_event_names.json."
+          if ! git diff --exit-code -- src/ipc/generated src-tauri/src/ipc/generated; then
+            echo "::error::Generated IPC events are out of date with shared/ipc_events.json."
             echo "::error::Run 'npm run gen:ipc-events' and commit the result."
             exit 1
           fi

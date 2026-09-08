@@ -23,6 +23,7 @@ use crate::error::RailError;
 use crate::hardware::stream::{IqCanceler, DEFAULT_USB_BUF_LEN};
 use crate::ipc::capture_cmd::{AudioStopInfo, CaptureControl, IqStopInfo};
 use crate::ipc::control::{DspControl, DspParamState, RadioParams};
+use crate::ipc::event_contract::Emit;
 use crate::ipc::events::{SignalClassification, SignalLevel};
 use crate::perf_emit::{
     record_audio_emit_interval, record_signal_level_emit_interval, record_waterfall_emit_interval,

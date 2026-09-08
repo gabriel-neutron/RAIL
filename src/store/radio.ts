@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 import * as commands from "../ipc/commands";
-import { type SignalClassificationPayload } from "../ipc/events";
+import { type SignalClassificationPayload } from "../ipc/generated/events";
 import {
   clampGainIndex,
   clampPpm,

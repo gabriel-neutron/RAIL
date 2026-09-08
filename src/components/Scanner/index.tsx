@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { subscribeIpcEvent } from "../../ipc/events";
 import {
-  subscribeScanComplete,
-  subscribeScanStep,
-  subscribeScanStopped,
-} from "../../ipc/events";
+  EVENT_SCAN_COMPLETE,
+  EVENT_SCAN_STEP,
+  EVENT_SCAN_STOPPED,
+} from "../../ipc/generated/events";
 import { useRadioStore } from "../../store/radio";
 import { useScannerStore } from "../../store/scanner";
 import BandActivity from "./BandActivity";
@@ -86,7 +87,7 @@ export const Scanner = () => {
     // would schedule a second retune of a frequency the scanner has
     // already tuned, landing inside its settle window and re-locking the
     // PLL under the measurement it is taking.
-    void subscribeScanStep((payload) => {
+    void subscribeIpcEvent(EVENT_SCAN_STEP, (payload) => {
       useRadioStore.getState().syncFrequencyFromBackend(payload.frequencyHz);
     }).then((fn) => {
       if (cancelled) fn();
@@ -102,7 +103,7 @@ export const Scanner = () => {
       }
     };
 
-    void subscribeScanComplete(() => {
+    void subscribeIpcEvent(EVENT_SCAN_COMPLETE, () => {
       endScan();
       setStatusText("Done");
       autoSelect();
@@ -111,7 +112,7 @@ export const Scanner = () => {
       else unlistenComplete = fn;
     });
 
-    void subscribeScanStopped((payload) => {
+    void subscribeIpcEvent(EVENT_SCAN_STOPPED, (payload) => {
       endScan();
       setStatusText(`Stopped — ${(payload.frequencyHz / 1e6).toFixed(3)} MHz`);
       autoSelect();

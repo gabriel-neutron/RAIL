@@ -17,6 +17,7 @@ use crate::error::RailError;
 use crate::hardware::stream::{IqCanceler, IQ_CHANNEL_CAPACITY};
 use crate::ipc::control::{DspControlHandle, RadioParams};
 use crate::ipc::dsp_task::{spawn_dsp_task, DspTaskCfg, FFT_SIZE};
+use crate::ipc::event_contract::Emit;
 use crate::ipc::events::DeviceStatus;
 use crate::ipc::session::types::{session_poisoned, AppState, Session, SessionSource};
 

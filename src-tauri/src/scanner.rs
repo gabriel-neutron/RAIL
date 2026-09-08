@@ -18,6 +18,7 @@ use tauri::{AppHandle, Runtime};
 
 use crate::hardware::Tuner;
 use crate::ipc::control::{DspControl, DspControlHandle};
+use crate::ipc::event_contract::Emit;
 use crate::ipc::events::{ScanComplete, ScanStep, ScanStopped};
 
 /// Arguments for [`start_scan`](crate::ipc::commands::start_scan).
@@ -199,7 +200,7 @@ pub(crate) fn spawn_scanner<R: Runtime, T: Tuner + Send + 'static>(
                 }
             }
             ScanEvent::Complete => {
-                if let Err(e) = ScanComplete.emit(&app) {
+                if let Err(e) = (ScanComplete {}).emit(&app) {
                     log::warn!("scanner: scan-complete emit failed: {e}");
                 }
             }

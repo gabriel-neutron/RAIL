@@ -130,20 +130,37 @@ RAIL uses two distinct IPC surfaces: **named JSON events** (low-rate status and 
 
 ### 3.2 Named events (Rust → React, JSON)
 
+Payload shapes are not repeated here — they live in
+[`shared/ipc_events.json`](../shared/ipc_events.json), the single contract
+`scripts/gen-ipc-events.mjs` compiles into both
+[`src-tauri/src/ipc/generated/events.rs`](../src-tauri/src/ipc/generated/events.rs)
+and [`src/ipc/generated/events.ts`](../src/ipc/generated/events.ts). Field
+names are snake_case in the contract and camelCase on the wire. Only the
+cadence, which the contract does not model, is listed below.
+
+| Event | Cadence |
+| --- | --- |
+| `device-status` | On connect / disconnect / error |
+| `signal-level` | ≤ 25 Hz, rate-limited with peak decay |
+| `signal-classification` | ~2 Hz while streaming |
+| `replay-position` | ~25 Hz while replay is open |
+| `scan-step` | Per scanner retune (~200–240 ms cadence during a sweep); keeps display components in sync |
+| `scan-complete` | Once, when a full sweep finishes without hitting squelch |
+| `scan-stopped` | Once, when the scanner halts early on a detected signal |
+
+Decoder events planned for Phases 17–22 (`docs/TIMELINE.md`), each landing as
+one contract entry alongside its producer:
+
 | Event | Payload | Cadence |
 | --- | --- | --- |
-| `device-status` | `{ connected, error? }` | On connect / disconnect / error |
-| `signal-level` | `{ current, peak }` in dBFS | ≤ 25 Hz, rate-limited with peak decay |
-| `replay-position` | `{ sampleIdx, positionMs, totalMs, playing }` | ~25 Hz while replay is open |
-| `scan-step` | `{ frequencyHz }` | Per scanner retune (~200–240 ms cadence during a sweep); keeps display components in sync |
-| `scan-complete` | `{}` | Once, when a full sweep finishes without hitting squelch |
-| `scan-stopped` | `{ frequencyHz }` | Once, when the scanner halts early on a detected signal |
-| `adsb-1090-frame` | `{ icao, lat?, lon?, alt_ft?, callsign?, speed_kts?, heading_deg?, raw_hex }` | Per decoded Mode S DF17 frame; rate-limited ≤ 10 fps |
-| `aprs-packet` | `{ from_callsign, to, lat?, lon?, comment, raw_info }` | Per valid AX.25 APRS frame; rate-limited |
-| `rds-group` | `{ pi_code, group_type, ps_name?, radio_text?, programme_type, traffic_programme }` | Per complete RDS group (PS name emitted when all 8 chars assembled) |
-| `pocsag-message` | `{ capcode, function, content, baud_rate }` | Per POCSAG message frame after BCH error correction |
+| `adsb-1090-frame` | `{ icao, lat?, lon?, altFt?, callsign?, speedKts?, headingDeg?, rawHex }` | Per decoded Mode S DF17 frame; rate-limited ≤ 10 fps |
+| `aprs-packet` | `{ fromCallsign, to, lat?, lon?, comment, rawInfo }` | Per valid AX.25 APRS frame; rate-limited |
+| `rds-group` | `{ piCode, groupType, psName?, radioText?, programmeType, trafficProgramme }` | Per complete RDS group (PS name emitted when all 8 chars assembled) |
+| `pocsag-message` | `{ capcode, function, content, baudRate }` | Per POCSAG message frame after BCH error correction |
 
-Constants live in [`src-tauri/src/ipc/events.rs`](../src-tauri/src/ipc/events.rs); TS mirrors in [`src/ipc/events.ts`](../src/ipc/events.ts).
+Every payload emits through the one [`Emit`](../src-tauri/src/ipc/event_contract.rs)
+blanket impl; the frontend subscribes through the one `subscribeIpcEvent` in
+[`src/ipc/events.ts`](../src/ipc/events.ts).
 
 ### 3.3 Streaming channels (Rust → React, binary)
 

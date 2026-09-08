@@ -23,11 +23,14 @@ npm run tauri dev
 Platform prerequisites (librtlsdr, Zadig on Windows, etc.) are covered in
 the root `README.md`.
 
-**IPC event names:** Named Tauri events (JSON bus) are listed in
-[`shared/ipc_event_names.json`](shared/ipc_event_names.json). `npm run build`
-runs codegen for [`src/ipc/generated/eventNames.ts`](src/ipc/generated/eventNames.ts);
-Rust picks up the same file via `src-tauri/build.rs`. Edit the JSON (or run
-`node scripts/gen-ipc-event-names.mjs`)—do not hand-edit the generated TS.
+**IPC events:** Named Tauri events (JSON bus) — wire names *and* payload
+shapes — are declared in [`shared/ipc_events.json`](shared/ipc_events.json).
+`npm run build` runs `scripts/gen-ipc-events.mjs`, which writes both
+[`src/ipc/generated/events.ts`](src/ipc/generated/events.ts) and
+[`src-tauri/src/ipc/generated/events.rs`](src-tauri/src/ipc/generated/events.rs).
+Adding an event means editing the JSON and running `npm run gen:ipc-events`;
+both generated files are committed and CI fails if they drift. Do not
+hand-edit them.
 
 **Optional backend emit profiling:** `cargo build --features profile` with
 `RAIL_PROFILE=1` and `RUST_LOG=rail_perf=info` — see [`docs/PERF.md`](docs/PERF.md).
