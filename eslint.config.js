@@ -39,7 +39,7 @@ export default tseslint.config(
       // React Compiler ergonomics rules. 7 pre-existing violations across
       // AudioControls / Transport / FrequencyControl / PpmControl / Scanner —
       // each needs a real component refactor, so they warn rather than block.
-      // TODO: fix those, then raise both to 'error'.
+      // Tracked in #11: fix those, then raise both to 'error'.
       'react-hooks/refs': 'warn',
       'react-hooks/set-state-in-effect': 'warn',
       // typescript-eslint's equivalents handle these; the core rules produce
