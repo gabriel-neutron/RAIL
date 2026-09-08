@@ -31,6 +31,9 @@ import { useReplayStore } from "./store/replay";
 import { useScannerStore } from "./store/scanner";
 import "./App.css";
 // Skin, loaded after App.css so its values win. See theme.css header.
+// App.css no longer duplicates any of it, so this order is load-bearing rather
+// than redundant: a component-level `import "./App.css"`, a Vite CSS-splitting
+// change, or a reorder here leaves the app unstyled with no error.
 import "./theme.css";
 
 type DeviceState =
