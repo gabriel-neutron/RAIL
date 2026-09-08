@@ -23,7 +23,7 @@ use crate::error::RailError;
 use crate::hardware::stream::{
     IqStream, DEFAULT_USB_BUF_LEN, DEFAULT_USB_BUF_NUM, IQ_CHANNEL_CAPACITY,
 };
-use crate::hardware::{self, DeviceInfo, RtlSdrDevice, TunerHandle};
+use crate::hardware::{self, DeviceInfo, RtlSdrDevice, RtlSdrTuner, Tuner};
 use crate::ipc::capture_cmd::CaptureControl;
 use crate::ipc::dsp_task::{spawn_dsp_task, AUDIO_CHUNK_SAMPLES, FFT_SIZE};
 use crate::ipc::events::DeviceStatus;
@@ -108,7 +108,7 @@ pub(crate) struct LiveBits {
     /// Thread-safe tuning surface. `None` after the session is torn down
     /// so that late `set_gain` calls return an error instead of racing
     /// with device close.
-    tuner: Option<TunerHandle>,
+    tuner: Option<RtlSdrTuner>,
     /// Discrete gain steps the hardware supports (tenths of dB).
     gains: Vec<i32>,
 }
@@ -272,12 +272,12 @@ pub async fn start_stream<R: Runtime>(
     // Park the LO `fs/4` below the user's target; the `−fs/4` digital
     // mixer in `apply_fs4_shift` brings the tuned carrier back to DC
     // with the hardware DC spike off-center (docs/DSP.md §1).
-    device.set_center_freq(args.frequency_hz.saturating_sub(offset))?;
-    device.set_tuner_gain_mode(false)?;
+    let tuner = device.tuner();
+    tuner.set_center_freq(args.frequency_hz.saturating_sub(offset))?;
+    tuner.set_tuner_gain_mode(false)?;
     let gains = device.available_gains().unwrap_or_default();
 
-    let tuner = device.tuner_handle();
-    let actual_freq = device.center_freq().saturating_add(offset);
+    let actual_freq = tuner.center_freq().saturating_add(offset);
 
     let (iq_tx, iq_rx) = mpsc::channel::<DspInput>(IQ_CHANNEL_CAPACITY);
     let (control_tx, control_rx) = mpsc::unbounded_channel::<DemodControl>();
@@ -363,13 +363,14 @@ pub async fn stop_stream<R: Runtime>(
     state: State<'_, AppState>,
 ) -> Result<(), RailError> {
     // Cancel any running scanner before tearing down the session it depends on.
-    {
-        let scanner = state.scanner.lock().ok().and_then(|mut g| g.take());
-        if let Some(h) = scanner {
-            h.cancel.store(true, Ordering::Relaxed);
-            // Don't await — let it exit on its own; the shared AtomicU32
-            // remains valid until both arcs are dropped.
-        }
+    // The mutex guard is a temporary of this statement, so it is released
+    // before the await below (`clippy::await_holding_lock` enforces that).
+    let scanner = state.scanner.lock().ok().and_then(|mut g| g.take());
+    if let Some(h) = scanner {
+        h.cancel.store(true, Ordering::Relaxed);
+        // Await it: the sweep holds an `RtlSdrTuner` over the device pointer,
+        // so closing the device before the task exits is a use-after-close.
+        let _ = h.handle.await;
     }
 
     let session = {

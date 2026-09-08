@@ -45,7 +45,7 @@ The app ships with a short sample IQ capture at [`docs/assets/demo_iq.sigmf-data
 ### Rust — `/src-tauri/src/`
 
 ```
-hardware/      mod.rs, stream.rs, ffi.rs
+hardware/      mod.rs, stream.rs, tuner.rs, ffi.rs
 dsp/           input.rs, fft.rs, waterfall.rs, filter.rs, demod/{mod,fm,am}.rs
 decoders/      mod.rs, adsb.rs, aprs.rs, rds.rs, pocsag.rs  (Phase 17)
 capture/       sigmf.rs, wav.rs, tmp.rs
@@ -117,7 +117,7 @@ High-rate frames travel on `tauri::ipc::Channel<InvokeResponseBody>` opened by t
 
 - **`waterfallChannel`** (`start_stream`, `start_replay`): `FFT_SIZE × 4 = 32768` bytes of little-endian `f32` magnitude (dB), at ≤ 25 fps.
 - **`audioChannel`** (same): `AUDIO_CHUNK_SAMPLES × 4 ≈ 7 KB` of mono `f32` PCM at 44.1 kHz.
-- **`scanChannel`** (`start_scan`): one `f32` (4 bytes) per frequency step — the peak dBFS measured during that step's dwell window. Step order matches `frequenciesHz[]` from the command reply.
+- **`scanChannel`** (`start_scan`): two little-endian `f32` (8 bytes) per frequency step — `signal_avg_db` (average power in the target channel window) then `noise_floor_db` (median of the full spectrum); the frontend takes the difference as SNR. Exactly one message per frequency, including steps whose retune failed (both fields `-inf`), so step order matches `frequenciesHz[]` from the command reply.
 
 Rust sends `InvokeResponseBody::Raw(Vec<u8>)`; the frontend receives an `ArrayBuffer` and wraps it with `new Float32Array(buffer)` (see [`src/hooks/useWaterfall.ts`](../src/hooks/useWaterfall.ts) and [`src/hooks/useAudio.ts`](../src/hooks/useAudio.ts)).
 
@@ -143,7 +143,7 @@ tokio::task::spawn_blocking (per stream)
         └── audio emit on audioChannel          (per AUDIO_CHUNK_SAMPLES)
 ```
 
-The read thread is `std::thread` (not tokio) because `rtlsdr_read_async` blocks until cancelled. The DSP worker is `spawn_blocking` because work is CPU-bound; it uses `blocking_recv` on the IQ channel. Stop is explicit and idempotent: `stop_stream` removes the `Session`, then awaits both handles; `IqStream::Drop` cancels+joins as a safety net.
+The read thread is `std::thread` (not tokio) because `rtlsdr_read_async` blocks until cancelled. The DSP worker is `spawn_blocking` because work is CPU-bound; it uses `blocking_recv` on the IQ channel. Stop is explicit and idempotent: `stop_stream` cancels the scanner task and **awaits** it, removes the `Session`, then awaits the read and DSP handles; `IqStream::Drop` cancels+joins as a safety net. Awaiting the scanner first is what makes the tuner sound: the sweep reaches the device through the `Tuner` port (`hardware/tuner.rs`), whose `RtlSdrTuner` adapter holds a borrowed, non-owning device pointer. The reader thread remains the device's owner, and still conditionally `mem::forget`s it when the dongle disappears mid-stream (see `hardware/stream.rs`).
 
 Replay mirrors this shape — a tokio task reads the SigMF file, decodes samples, and feeds the same DSP worker type via a `DspInput::Cf32Prefill` priming variant.
 
