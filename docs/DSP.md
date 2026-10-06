@@ -314,6 +314,8 @@ Library option: `biquad` crate for IIR filters (simpler, lower CPU).
 | SSB audio DAC overflow | Hilbert combine peaks at ±1.5 | tanh soft-clip before resampler |
 | FFT size mismatch | N not matching buffer | Assert N == buffer size before FFT |
 | Normalization drift | No reference level | Fix noise floor reference at startup |
+| Ghost signal: a peak recedes as you tune toward it | Waterfall history keeps its painted columns while the axis is relabelled for the new centre; displaced by `new centre − old centre` | `retuneShiftPx` slides the history on every non-drag retune (§9.6). Drag already shifts it |
+| Ghost signal, same symptom, history cleared | Not a fault in the chain: a synthetic carrier swept through live LO → mixer → FFT → crop lands within one bin at every centre (`ghost_sweep.rs`, `apparentFrequency.test.ts`). IQ-image mirror (slope −1) and fs/4 sign error (offset ≈ fs/2) are ruled out. Left to measure on hardware: a spur fixed relative to the LO, and queued old-centre IQ — at most `IQ_CHANNEL_CAPACITY` chunks + USB buffers, about 96 ms at 2.048 Msps | Compare with a second dongle or SDR#/GQRX at the same centres (issue #24) |
 
 ---
 
@@ -333,12 +335,13 @@ this section's transform from there rather than rebuilding it.
 
 ### 9.2 Hz ↔ pixel
 
-The visible span at zoom `z` is `span = fs / z`. After the fs/4 mixer of §1–3
-the tuned signal sits at canvas centre, so the span is symmetric about it:
+The visible span is the true one of §9.5, `span = fs · kept / N`. After the
+fs/4 mixer of §1–3 the tuned signal sits at the centre of bin `N/2`; `minHz`
+is the left edge of the first kept bin:
 
 ```
-minHz = f − span/2
-maxHz = f + span/2
+minHz = f + (start − N/2 − ½) · fs / N     (start, kept: §9.5)
+maxHz = minHz + span
 x     = (hz − minHz) / span · width
 hz    = minHz + x / width · span
 ```
@@ -407,3 +410,13 @@ half a bin off centre (issue #17).
 
 `cropWindow` in `src/viewport/spectrumViewport.ts` is the one owner of
 `start`/`kept`; the waterfall crop and the viewport both call it.
+
+### 9.6 Retune and the painted history
+
+Waterfall rows are pixels: a row keeps the column it was painted at. When the
+centre moves from `f₀` to `f₁` the history must slide by
+`retuneShiftPx = round(hzWidthToPx(f₀ − f₁))` or every old streak is
+relabelled `f₁ − f₀` away from its true frequency. A drag shifts the canvas
+itself as it goes; every other retune (click, keyboard, typed, scanner) goes
+through the `frequencyHz` effect in `Waterfall`. Content shifted past an edge
+is lost; the exposed strip is background.

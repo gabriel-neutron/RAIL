@@ -14,6 +14,7 @@ import {
   binLeftX,
   createSpectrumViewport,
   cropWindow,
+  retuneShiftPx,
   spanHz,
   xToBinIndex,
 } from "../../viewport/spectrumViewport";
@@ -175,6 +176,27 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
   useEffect(() => {
     avgFrameRef.current = null;
   }, [frequencyHz]);
+
+  // History rows keep the column they were painted at. Slide them with the
+  // centre so they stay on their true frequency instead of ghosting at the
+  // wrong one under the new axis. A drag does this itself (CSS shift baked in
+  // on release), so it is skipped here.
+  const previousFrequencyHzRef = useRef(frequencyHz);
+  useEffect(() => {
+    const previousHz = previousFrequencyHzRef.current;
+    previousFrequencyHzRef.current = frequencyHz;
+    const canvas = waterfallCanvasRef.current;
+    if (!canvas || previousHz === frequencyHz || isDraggingRef.current) return;
+    const view = createSpectrumViewport({
+      centerHz: frequencyHz,
+      sampleRateHz,
+      zoom,
+      fftSize,
+      cssWidthPx: canvas.width,
+    });
+    if (view === null) return;
+    shiftCanvasContent(canvas, retuneShiftPx(view, previousHz, frequencyHz));
+  }, [frequencyHz, sampleRateHz, zoom, fftSize]);
 
   // Register a PNG screenshot source with the capture store so the
   // "save screenshot" menu entry can grab the waterfall without

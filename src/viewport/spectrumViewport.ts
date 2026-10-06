@@ -110,6 +110,16 @@ export const createSpectrumViewport = ({
   });
 };
 
+/// Pixels to slide already-painted history so it stays on the frequencies it
+/// was captured at after a retune from `previousCenterHz` to `centerHz`.
+/// `view` is the viewport at the NEW centre, in the pixel space of the canvas
+/// being shifted. Positive = right. See: docs/DSP.md §8 "Ghost signals".
+export const retuneShiftPx = (
+  view: SpectrumViewport,
+  previousCenterHz: number,
+  centerHz: number,
+): number => Math.round(view.hzWidthToPx(previousCenterHz - centerHz));
+
 // The bin helpers below name the shared cell map (`./cellAxis`) in bin terms.
 // The asymmetry between the two directions is the point, and is explained in
 // docs/DSP.md §9.3.
