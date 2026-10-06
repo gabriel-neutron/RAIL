@@ -13,6 +13,7 @@ import { prepareCanvas2d } from "../../viewport/canvasSizing";
 import {
   binLeftX,
   createSpectrumViewport,
+  cropWindow,
   spanHz,
   xToBinIndex,
 } from "../../viewport/spectrumViewport";
@@ -42,14 +43,10 @@ type WaterfallProps = {
   onAudio?: (frame: Float32Array) => void;
 };
 
-/// Crop the center `len/zoom` bins of a shifted FFT frame. After the
-/// `fs/4` digital mixer + FFT shift, the user's target sits at bin
-/// `N/2`, so a symmetric slice around the middle keeps the tuned
-/// signal centered at any zoom level (docs/DSP.md §1–3).
+/// Crop a shifted FFT frame to the window the viewport labels
+/// (`cropWindow`, docs/DSP.md §1–3 and §9.5).
 const cropCenter = (frame: Float32Array, zoom: number): Float32Array => {
-  if (zoom <= 1) return frame;
-  const kept = Math.max(16, Math.floor(frame.length / zoom));
-  const start = Math.floor((frame.length - kept) / 2);
+  const { start, kept } = cropWindow(frame.length, zoom);
   return frame.subarray(start, start + kept);
 };
 
@@ -103,6 +100,7 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
 
   const zoom = useRadioStore((s) => s.zoom);
   const sampleRateHz = useRadioStore((s) => s.sampleRateHz);
+  const fftSize = useRadioStore((s) => s.fftSize);
   const frequencyHz = useRadioStore((s) => s.frequencyHz);
   /// Bumped by the replay store on open / seek / loop. While replaying
   /// an IQ file we want the waterfall's Y-axis to track file time, not
@@ -242,6 +240,7 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
       centerHz: store.frequencyHz,
       sampleRateHz: store.sampleRateHz,
       zoom: store.zoom,
+      fftSize: store.fftSize,
       cssWidthPx: rectWidth,
     });
   };
@@ -334,7 +333,7 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
     store.setFrequency(store.frequencyHz + view.pxWidthToHz(offsetPx));
   };
 
-  const displayedSpanHz = spanHz(sampleRateHz, zoom);
+  const displayedSpanHz = spanHz(sampleRateHz, zoom, fftSize);
 
   return (
     <section className="waterfall">

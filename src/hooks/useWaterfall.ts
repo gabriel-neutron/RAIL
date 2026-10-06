@@ -153,6 +153,7 @@ export const useWaterfall = ({
         setSession(reply);
         setError(null);
         radio.setSampleRate(reply.sampleRateHz);
+        radio.setFftSize(reply.fftSize);
         radio.setStreaming(true);
         rafId = window.requestAnimationFrame(drain);
       } catch (err) {

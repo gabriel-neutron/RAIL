@@ -5,17 +5,40 @@
 // privately inside its own draw effect; they now all ask this module.
 //
 // See: docs/DSP.md §9 for the transform itself, its bin/pixel cell
-// semantics, and the known nominal-vs-true span discrepancy.
+// semantics, and the true-span rule (§9.5).
 
 import { cellLeftX, xToCellIndex } from "./cellAxis";
 
-/// The frequency span visible on screen, in Hz, at `zoom`.
+/// Fewest bins the waterfall ever keeps, however far it is zoomed.
+const MIN_KEPT_BINS = 16;
+
+/// The slice of a shifted FFT frame the waterfall displays at `zoom`.
+/// `start` is the first kept bin, `kept` how many follow it.
 ///
-/// This is the NOMINAL span the overlays label. The waterfall's true span
-/// is slightly narrower at non-integer zoom because `cropCenter` keeps a
-/// whole number of bins — see docs/DSP.md §9 "known discrepancy".
-export const spanHz = (sampleRateHz: number, zoom: number): number =>
-  sampleRateHz / zoom;
+/// After the fs/4 shift the tuned frequency is the CENTRE of bin `N/2`, so
+/// the window is placed around edge index `N/2 + ½`. When `N − kept` is even
+/// that is a whole bin; otherwise the nearest whole bin leaves a residual
+/// half bin, which `createSpectrumViewport` absorbs rather than hides.
+/// See: docs/DSP.md §9.5.
+export const cropWindow = (
+  fftSize: number,
+  zoom: number,
+): Readonly<{ start: number; kept: number }> => {
+  if (zoom <= 1) return { start: 0, kept: fftSize };
+  const kept = Math.min(
+    fftSize,
+    Math.max(MIN_KEPT_BINS, Math.floor(fftSize / zoom)),
+  );
+  return { start: Math.floor((fftSize + 1 - kept) / 2), kept };
+};
+
+/// The frequency span the waterfall really shows at `zoom`, in Hz:
+/// `fs · kept / N`. See: docs/DSP.md §9.5.
+export const spanHz = (
+  sampleRateHz: number,
+  zoom: number,
+  fftSize: number,
+): number => (sampleRateHz * cropWindow(fftSize, zoom).kept) / fftSize;
 
 /// The Hz<->pixel mapping for one canvas width, at one tuning.
 ///
@@ -47,6 +70,8 @@ export type SpectrumViewportInput = {
   centerHz: number;
   sampleRateHz: number;
   zoom: number;
+  /// FFT length N of the frames being cropped (a power of two from the backend).
+  fftSize: number;
   /// Canvas width in the caller's own pixel space.
   cssWidthPx: number;
 };
@@ -58,15 +83,21 @@ export const createSpectrumViewport = ({
   centerHz,
   sampleRateHz,
   zoom,
+  fftSize,
   cssWidthPx,
 }: SpectrumViewportInput): SpectrumViewport | null => {
   if (!Number.isFinite(cssWidthPx) || cssWidthPx <= 0) return null;
   if (!Number.isFinite(centerHz)) return null;
-  const span = spanHz(sampleRateHz, zoom);
+  if (!Number.isFinite(fftSize) || fftSize <= 0) return null;
+  if (!Number.isFinite(zoom) || zoom <= 0) return null;
+  const span = spanHz(sampleRateHz, zoom, fftSize);
   if (!Number.isFinite(span) || span <= 0) return null;
 
-  const minHz = centerHz - span / 2;
-  const maxHz = centerHz + span / 2;
+  // Left edge of the first kept bin, measured from the centre of bin N/2.
+  const { start } = cropWindow(fftSize, zoom);
+  const binHz = sampleRateHz / fftSize;
+  const minHz = centerHz + (start - fftSize / 2 - 0.5) * binHz;
+  const maxHz = minHz + span;
 
   return Object.freeze({
     spanHz: span,

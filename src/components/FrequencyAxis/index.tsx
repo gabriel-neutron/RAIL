@@ -48,6 +48,7 @@ export const FrequencyAxis = () => {
   const frequencyHz = useRadioStore((s) => s.frequencyHz);
   const sampleRateHz = useRadioStore((s) => s.sampleRateHz);
   const zoom = useRadioStore((s) => s.zoom);
+  const fftSize = useRadioStore((s) => s.fftSize);
   const resizeTick = useResizeTick(canvasRef);
 
   useEffect(() => {
@@ -63,6 +64,7 @@ export const FrequencyAxis = () => {
       centerHz: frequencyHz,
       sampleRateHz,
       zoom,
+      fftSize,
       cssWidthPx: cssWidth,
     });
     if (view === null) return;
@@ -205,7 +207,7 @@ export const FrequencyAxis = () => {
     ctx.moveTo(0, cssHeight - 0.5);
     ctx.lineTo(cssWidth, cssHeight - 0.5);
     ctx.stroke();
-  }, [frequencyHz, sampleRateHz, zoom, resizeTick]);
+  }, [frequencyHz, sampleRateHz, zoom, fftSize, resizeTick]);
 
   return <canvas ref={canvasRef} className="freq-axis-canvas" aria-hidden="true" />;
 };

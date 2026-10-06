@@ -30,6 +30,7 @@ export const BandGuideAxis = () => {
   const frequencyHz = useRadioStore((s) => s.frequencyHz);
   const sampleRateHz = useRadioStore((s) => s.sampleRateHz);
   const zoom = useRadioStore((s) => s.zoom);
+  const fftSize = useRadioStore((s) => s.fftSize);
   const visible = useBandGuideStore((s) => s.visible);
   const activeCategories = useBandGuideStore((s) => s.activeCategories);
   const region = useBandGuideStore((s) => s.region);
@@ -47,6 +48,7 @@ export const BandGuideAxis = () => {
       centerHz: frequencyHz,
       sampleRateHz,
       zoom,
+      fftSize,
       cssWidthPx: cssWidth,
     });
     if (view === null) return;
@@ -122,7 +124,7 @@ export const BandGuideAxis = () => {
     ctx.moveTo(0, HEIGHT_PX - 0.5);
     ctx.lineTo(cssWidth, HEIGHT_PX - 0.5);
     ctx.stroke();
-  }, [frequencyHz, sampleRateHz, zoom, visible, activeCategories, region, resizeTick]);
+  }, [frequencyHz, sampleRateHz, zoom, fftSize, visible, activeCategories, region, resizeTick]);
 
   if (!visible) return null;
 

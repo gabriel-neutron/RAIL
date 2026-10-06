@@ -40,6 +40,7 @@ export const FilterBandMarker = () => {
   const bandwidthHz = useRadioStore((s) => s.bandwidthHz);
   const sampleRateHz = useRadioStore((s) => s.sampleRateHz);
   const zoom = useRadioStore((s) => s.zoom);
+  const fftSize = useRadioStore((s) => s.fftSize);
   const resizeTick = useResizeTick(canvasRef);
 
   useEffect(() => {
@@ -61,6 +62,7 @@ export const FilterBandMarker = () => {
       centerHz: 0,
       sampleRateHz,
       zoom,
+      fftSize,
       cssWidthPx: cssWidth,
     });
     if (view === null) return;
@@ -128,7 +130,7 @@ export const FilterBandMarker = () => {
       ctx.fillStyle = LABEL_COLOR;
       ctx.fillText(formatHz(bandwidthHz), centerX, LABEL_BASELINE);
     }
-  }, [bandwidthHz, sampleRateHz, zoom, resizeTick]);
+  }, [bandwidthHz, sampleRateHz, zoom, fftSize, resizeTick]);
 
   return <canvas ref={canvasRef} className="filter-band-marker" aria-hidden="true" />;
 };

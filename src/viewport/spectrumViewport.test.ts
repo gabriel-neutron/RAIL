@@ -4,6 +4,7 @@ import { ZOOM_MAX, ZOOM_MIN } from "../store/radio";
 import {
   binLeftX,
   createSpectrumViewport,
+  cropWindow,
   spanHz,
   xToBinIndex,
   type SpectrumViewport,
@@ -11,12 +12,15 @@ import {
 
 const CENTER_HZ = 101_100_000;
 const SAMPLE_RATE_HZ = 2_048_000;
+const FFT_SIZE = 8192;
+const BIN_HZ = SAMPLE_RATE_HZ / FFT_SIZE;
 
 const build = (zoom: number, cssWidthPx: number): SpectrumViewport => {
   const view = createSpectrumViewport({
     centerHz: CENTER_HZ,
     sampleRateHz: SAMPLE_RATE_HZ,
     zoom,
+    fftSize: FFT_SIZE,
     cssWidthPx,
   });
   if (view === null) throw new Error("expected a viewport");
@@ -29,12 +33,29 @@ const ZOOMS = [1, 2, 7.5, 64];
 const WIDTHS = [100, 577, 1920];
 
 describe("spanHz", () => {
-  // Characterisation: the overlays label the NOMINAL span. The waterfall's
-  // true span is fs * kept / N (docs/DSP.md §9). Changing this is a product
-  // decision, so it has a test to change.
-  it("is the nominal sample rate over zoom", () => {
-    expect(spanHz(2_048_000, 1)).toBe(2_048_000);
-    expect(spanHz(2_048_000, 50)).toBe(2_048_000 / 50);
+  it("is the span the waterfall really shows, fs * kept / N", () => {
+    expect(spanHz(2_048_000, 1, FFT_SIZE)).toBe(2_048_000);
+    // floor(8192 / 50) = 163 bins, not the nominal 163.84.
+    expect(spanHz(2_048_000, 50, FFT_SIZE)).toBe(163 * BIN_HZ);
+  });
+});
+
+describe("cropWindow", () => {
+  it("keeps the whole frame at zoom 1", () => {
+    expect(cropWindow(FFT_SIZE, 1)).toEqual({ start: 0, kept: FFT_SIZE });
+  });
+
+  it("centres on the middle of bin N/2 whenever N - kept is odd", () => {
+    // kept = 8192 / 64 = 128 is even, so N - kept is even: half-bin residual.
+    // kept = floor(8192 / 7.5) = 1092 is even too; 8192 / 6 -> 1365 is odd.
+    const { start, kept } = cropWindow(FFT_SIZE, 6);
+    expect(kept).toBe(1365);
+    expect(start + kept / 2).toBe(FFT_SIZE / 2 + 0.5);
+  });
+
+  it("never keeps fewer than 16 bins or more than the frame", () => {
+    expect(cropWindow(FFT_SIZE, 1e9).kept).toBe(16);
+    expect(cropWindow(8, 2).kept).toBeLessThanOrEqual(8);
   });
 });
 
@@ -58,16 +79,30 @@ describe("createSpectrumViewport", () => {
         const view = build(zoom, cssWidthPx);
         expect(view.hzToX(view.minHz)).toBeCloseTo(0, 9);
         expect(view.hzToX(view.maxHz)).toBeCloseTo(cssWidthPx, 9);
-        expect(view.hzToX(CENTER_HZ)).toBeCloseTo(cssWidthPx / 2, 9);
+        const halfBinPx = view.hzWidthToPx(BIN_HZ / 2);
+        expect(Math.abs(view.hzToX(CENTER_HZ) - cssWidthPx / 2)).toBeLessThanOrEqual(
+          halfBinPx + 1e-9,
+        );
       }
     }
   });
 
-  it("spans symmetrically about the tuned centre", () => {
+  it("spans the true width, centred on the tuned bin to within half a bin", () => {
     const view = build(4, 800);
     expect(view.spanHz).toBe(SAMPLE_RATE_HZ / 4);
     expect(view.maxHz - view.minHz).toBeCloseTo(view.spanHz, 6);
-    expect((view.minHz + view.maxHz) / 2).toBeCloseTo(CENTER_HZ, 6);
+    // Bin N/2 is centred on CENTER_HZ, so its edges sit half a bin either side.
+    expect(view.hzToX(CENTER_HZ - BIN_HZ / 2)).toBeLessThan(view.hzToX(CENTER_HZ));
+  });
+
+  it("puts the centre of bin N/2 exactly on CENTER_HZ at every zoom", () => {
+    // The bin that holds the tuned frequency, as an edge index and in pixels.
+    for (const zoom of [1, 2, 3, 6, 7.5, 50, 64]) {
+      const { start, kept } = cropWindow(FFT_SIZE, zoom);
+      const view = build(zoom, kept * 4);
+      const dcCentreX = (FFT_SIZE / 2 + 0.5 - start) * 4;
+      expect(view.hzToX(CENTER_HZ)).toBeCloseTo(dcCentreX, 6);
+    }
   });
 
   // Pan safety. The drag handler retunes as it moves, so it must use a
@@ -79,6 +114,7 @@ describe("createSpectrumViewport", () => {
       centerHz: CENTER_HZ + 5_000_000,
       sampleRateHz: SAMPLE_RATE_HZ,
       zoom: 8,
+      fftSize: FFT_SIZE,
       cssWidthPx: 640,
     });
     if (b === null) throw new Error("expected a viewport");
@@ -95,7 +131,13 @@ describe("createSpectrumViewport", () => {
   });
 
   it("returns null for inputs that cannot describe a visible span", () => {
-    const base = { centerHz: CENTER_HZ, sampleRateHz: SAMPLE_RATE_HZ, zoom: 1, cssWidthPx: 800 };
+    const base = {
+      centerHz: CENTER_HZ,
+      sampleRateHz: SAMPLE_RATE_HZ,
+      zoom: 1,
+      fftSize: FFT_SIZE,
+      cssWidthPx: 800,
+    };
     for (const cssWidthPx of [0, -1, Number.NaN]) {
       expect(createSpectrumViewport({ ...base, cssWidthPx })).toBeNull();
     }
@@ -104,6 +146,9 @@ describe("createSpectrumViewport", () => {
     }
     for (const zoom of [0, Number.POSITIVE_INFINITY]) {
       expect(createSpectrumViewport({ ...base, zoom })).toBeNull();
+    }
+    for (const fftSize of [0, Number.NaN]) {
+      expect(createSpectrumViewport({ ...base, fftSize })).toBeNull();
     }
     expect(createSpectrumViewport({ ...base, centerHz: Number.NaN })).toBeNull();
   });

@@ -48,6 +48,8 @@ export const ZOOM_MAX = 64;
 export type RadioState = {
   frequencyHz: number;
   sampleRateHz: number;
+  /// FFT length N of the streamed frames; the frame length the waterfall crops.
+  fftSize: number;
   mode: DemodMode;
   bandwidthHz: number;
   autoGain: boolean;
@@ -78,6 +80,7 @@ export type RadioState = {
   /// already there.
   syncFrequencyFromBackend: (hz: number) => void;
   setSampleRate: (hz: number) => void;
+  setFftSize: (fftSize: number) => void;
   setMode: (mode: DemodMode) => void;
   setBandwidth: (hz: number) => void;
   setAutoGain: (auto: boolean) => void;
@@ -138,6 +141,7 @@ export const useRadioStore = create<RadioState>((set, get) => {
     canTouchHardware: control.canTouchHardware,
     frequencyHz: 100_000_000,
     sampleRateHz: 2_048_000,
+    fftSize: 8192,
     mode: "FM",
     bandwidthHz: 200_000,
     autoGain: true,
@@ -169,6 +173,7 @@ export const useRadioStore = create<RadioState>((set, get) => {
     syncFrequencyFromBackend: (frequencyHz) =>
       set({ frequencyHz: Math.max(0, Math.round(frequencyHz)) }),
     setSampleRate: (sampleRateHz) => set({ sampleRateHz }),
+    setFftSize: (fftSize) => set({ fftSize }),
     setMode: (mode) => {
       const prev = get().mode;
       set({ mode });

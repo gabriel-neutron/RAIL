@@ -386,21 +386,24 @@ That exception is also why the waterfall's drag hit-test can treat
 conflated: CSS pixels (overlays, under `setTransform(dpr, …)`), backing-store
 pixels (the streaming pair), and `getBoundingClientRect().width` (hit-testing).
 
-### 9.5 Known discrepancy: nominal vs true span
+### 9.5 True span and the crop window
 
-The overlays label the **nominal** span `fs / z`. The waterfall actually shows
+The overlays label the span the waterfall actually shows, not `fs / z`:
 
 ```
-kept  = max(16, floor(N / z))
-true  = fs · kept / N
+kept  = min(N, max(16, floor(N / z)))
+span  = fs · kept / N
+start = floor((N + 1 − kept) / 2)
+minHz = f + (start − N/2 − ½) · fs / N
 ```
 
-so the labelled span is slightly wide at non-integer zoom — exact at z = 1,
-about 0.5 % at z = 50. `cropCenter` also starts at `floor((N − kept) / 2)`,
-which puts the crop half a bin off centre when `N − kept` is odd (~250 Hz at
-z = 64, N = 8192).
+The tuned frequency is the *centre* of bin `N/2` after the FFT shift, so the
+crop is placed around edge index `N/2 + ½`. `start` is the nearest whole bin;
+when `N − kept` is even the residual is half a bin (125 Hz at N = 8192,
+fs = 2.048 MHz), and `minHz` absorbs it so every overlay lands exactly on the
+bins drawn. At z = 1 the span is `fs` and `minHz` sits half a bin below
+`f − fs/2`. Nominal `fs / z` was off by up to ~0.5 % at z = 50 and put the crop
+half a bin off centre (issue #17).
 
-Recorded, not fixed. Correcting it moves every tick label, band-bar edge and
-filter bracket at high zoom; the alternative — snapping wheel zoom so
-`floor(N / z)` is exact — changes how zooming feels. That is a product
-decision, tracked in issue #17.
+`cropWindow` in `src/viewport/spectrumViewport.ts` is the one owner of
+`start`/`kept`; the waterfall crop and the viewport both call it.
