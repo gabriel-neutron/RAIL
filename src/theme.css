@@ -1,0 +1,902 @@
+/* RAIL visual identity — quiet amber instrument panel.
+ *
+ * Structure lives in App.css; this file is the skin. Loading it after App.css
+ * is what makes it win, so keep that import order in App.tsx.
+ *
+ * Rationale
+ * - ONE hue, amber, on near-black. Contrast measured on the panel ground
+ *   (#0d0903), ascending:
+ *     hair   #2a1c06  panel edges and dividers, decorative only  (1.2:1)
+ *     faint  #785011  control borders and disabled text           (2.8:1)
+ *     dim    #a36d18  labels, units, secondary text               (4.5:1  AA)
+ *     mid    #d99b2e  body and navigation                         (8.2:1)
+ *     bright #ffb229  live values and the single selected state  (11.0:1)
+ *     bloom  #fff4dd  the frequency readout and peaks            (18.2:1)
+ * - Hierarchy is carried by size and luminance, not decoration. The frequency
+ *   readout is the only large element; labels are small, dim, uppercase.
+ * - Selection is one idiom everywhere: a filled `bright` chip with dark text.
+ *   Nothing else is filled, so the eye lands on what is currently set.
+ * - No texture: no scanlines, glow, vignette, blinking, glyph ornaments or
+ *   bracketed buttons. Motion is limited to a 120ms colour change on hover.
+ * - Type: IBM Plex Mono throughout (it is a measurement tool; digits must
+ *   align). 13px body, 11px floor for labels, tracking <= 0.08em.
+ * - Grid: 4px base, 12px between panels, 8px inside a control group.
+ *   Radius 2px on controls, 4px on panels. Every target is at least 24px.
+ */
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("/fonts/ibm-plex-mono-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+  src: url("/fonts/ibm-plex-mono-500.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url("/fonts/ibm-plex-mono-600.woff2") format("woff2");
+}
+
+:root {
+  /* Canvas-read custom props (frequency axis, filter marker). */
+  --accent-tuned: #ffb229;
+  --axis-label: #a36d18;
+  --axis-tick-major: #785011;
+  --axis-tick-minor: #3a2809;
+
+  --ph-void: #060401;
+  --ph-panel: #0d0903;
+  --ph-hair: #2a1c06;
+  --ph-faint: #785011;
+  --ph-dim: #a36d18;
+  --ph-mid: #d99b2e;
+  --ph-bright: #ffb229;
+  --ph-bloom: #fff4dd;
+  --ph-ink: #0a0702;
+
+  --ph-mono: "IBM Plex Mono", "Consolas", ui-monospace, monospace;
+  --radius-control: 2px;
+  --radius-panel: 4px;
+
+  font-family: var(--ph-mono);
+  font-size: 13px;
+  color: var(--ph-mid);
+  background-color: var(--ph-void);
+}
+
+html,
+body,
+#root {
+  background-color: var(--ph-void);
+}
+
+/* -------- Shell -------- */
+
+.app {
+  font-family: var(--ph-mono);
+  font-size: 13px;
+  line-height: 1.3;
+  color: var(--ph-mid);
+  background-color: var(--ph-void);
+}
+
+.app button,
+.app input {
+  font-family: var(--ph-mono);
+}
+
+/* Shared label voice: small, dim, uppercase. No colons, no ornaments. */
+.mode-selector-label,
+.filter-control-label,
+.ppm-control-label,
+.scanner-label,
+.wf-range-label,
+.signal-meter-header,
+.scanner-header,
+.menu-section-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ph-dim);
+  white-space: nowrap;
+}
+
+/* -------- Top bar -------- */
+
+.topbar h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.24em;
+  color: var(--ph-bloom);
+}
+
+.status-pill {
+  gap: 8px;
+  padding: 0 4px;
+  background: transparent;
+  border: none;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ph-dim);
+  min-width: 0;
+}
+
+.status-pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--ph-faint);
+}
+
+.status-pill-green .status-pill-dot {
+  background-color: var(--ph-bright);
+}
+
+.status-pill-amber .status-pill-dot {
+  background-color: var(--ph-dim);
+}
+
+.status-pill-red .status-pill-dot {
+  background-color: transparent;
+  border: 1px solid var(--ph-bright);
+}
+
+.status-pill-label {
+  color: var(--ph-dim);
+}
+
+.status-pill-green .status-pill-label {
+  color: var(--ph-mid);
+}
+
+.status-pill-red .status-pill-label {
+  color: var(--ph-bright);
+}
+
+.status-pill-refresh {
+  min-height: 24px;
+  margin-left: 4px;
+  padding: 0 8px;
+  font-size: 11px;
+  color: var(--ph-mid);
+  background: transparent;
+  border: 1px solid var(--ph-faint);
+  border-radius: var(--radius-control);
+}
+
+.status-pill-refresh:hover {
+  color: var(--ph-bloom);
+  border-color: var(--ph-dim);
+}
+
+/* -------- Panels -------- */
+
+.control-panel,
+.scanner-panel,
+.signal-meter,
+.transport-bar {
+  background-color: var(--ph-panel);
+  border: 1px solid var(--ph-hair);
+  border-radius: var(--radius-panel);
+}
+
+.control-panel {
+  gap: 12px;
+  padding: 12px 16px;
+}
+
+/* -------- Shared control chrome -------- */
+
+.mode-selector-buttons,
+.filter-control-buttons,
+.frequency-control-units,
+.frequency-control-steps {
+  border: 1px solid var(--ph-hair);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+
+.mode-btn,
+.filter-btn,
+.unit-btn,
+.step-btn {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--ph-dim);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  min-height: 26px;
+  padding: 0 8px;
+  transition: color 120ms ease-out, background-color 120ms ease-out;
+}
+
+.mode-btn:hover:not(:disabled):not(.mode-btn-active),
+.filter-btn:hover:not(:disabled):not(.filter-btn-active),
+.unit-btn:hover:not(.unit-btn-active),
+.step-btn:hover:not(:disabled) {
+  color: var(--ph-bloom);
+  background-color: var(--ph-hair);
+}
+
+.mode-btn-active,
+.mode-btn-active:hover,
+.filter-btn-active,
+.filter-btn-active:hover,
+.unit-btn-active {
+  color: var(--ph-ink);
+  background-color: var(--ph-bright);
+}
+
+.mode-btn:disabled,
+.filter-btn:disabled,
+.step-btn:disabled {
+  color: var(--ph-faint);
+}
+
+.mode-btn:active:not(:disabled) {
+  transform: none;
+}
+
+/* -------- Frequency -------- */
+
+.frequency-control {
+  gap: 8px;
+}
+
+.frequency-control-row {
+  gap: 16px;
+}
+
+.frequency-control-frequency {
+  padding: 0 0 0 2px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--ph-hair);
+  border-radius: 0;
+  color: var(--ph-bloom);
+  font-weight: 500;
+  font-size: 40px;
+  line-height: 1.15;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.frequency-control-frequency:focus {
+  border-bottom-color: var(--ph-bright);
+}
+
+.frequency-control-frequency:disabled {
+  opacity: 1;
+  color: var(--ph-faint);
+}
+
+.step-btn {
+  flex: 1;
+  font-variant-numeric: tabular-nums;
+  border-right: 1px solid var(--ph-hair);
+}
+
+.step-btn:last-child {
+  border-right: none;
+}
+
+/* -------- Mode / bandwidth / tools -------- */
+
+.mode-selector,
+.filter-control,
+.ppm-control {
+  gap: 8px;
+}
+
+/* Classifier hints: underline the confirmed mode, mark suggestions with ?. */
+.mode-btn-confirmed,
+.mode-btn-confirmed:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.mode-btn-suggested::before {
+  content: "?";
+  margin-right: 2px;
+}
+
+.mode-suggested-badge {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border: 1px solid var(--ph-faint);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--ph-mid);
+}
+
+.ppm-control-input,
+.scanner-input {
+  min-height: 26px;
+  padding: 0 8px;
+  background-color: var(--ph-void);
+  border: 1px solid var(--ph-hair);
+  border-radius: var(--radius-control);
+  color: var(--ph-bright);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ppm-control-input {
+  width: 52px;
+}
+
+.ppm-control-input:focus,
+.scanner-input:focus {
+  border-color: var(--ph-bright);
+}
+
+.ppm-control-input:disabled,
+.scanner-input:disabled {
+  color: var(--ph-faint);
+}
+
+.ppm-control-error,
+.menu-error {
+  font-size: 11px;
+  color: var(--ph-bright);
+}
+
+/* Audio: three icon buttons, track opens on hover. */
+.audio-controls {
+  gap: 4px;
+}
+
+.hover-slider {
+  gap: 0;
+}
+
+.hover-slider-btn {
+  width: 26px;
+  min-height: 26px;
+  border-radius: var(--radius-control);
+  color: var(--ph-dim);
+  transition: color 120ms ease-out, background-color 120ms ease-out;
+}
+
+.hover-slider-btn:hover {
+  color: var(--ph-bloom);
+  background-color: var(--ph-hair);
+}
+
+.hover-slider-btn:active {
+  transform: none;
+}
+
+.hover-slider-track-bg {
+  height: 2px;
+  background-color: var(--ph-hair);
+}
+
+.hover-slider-track-fill {
+  height: 2px;
+  background-color: var(--ph-mid);
+}
+
+.hover-slider-track:hover .hover-slider-track-fill {
+  background-color: var(--ph-bright);
+}
+
+.hover-slider-thumb {
+  width: 8px;
+  height: 8px;
+  background-color: var(--ph-bloom);
+}
+
+.hover-slider-track:hover .hover-slider-thumb {
+  transform: none;
+}
+
+.hover-slider-value {
+  min-width: 5ch;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--ph-dim);
+}
+
+/* -------- Menu bar -------- */
+
+.menu-bar {
+  background: transparent;
+  border: none;
+  padding: 0;
+  gap: 0;
+}
+
+.menu-top {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--ph-dim);
+  padding: 4px 12px;
+  border-radius: var(--radius-control);
+  transition: color 120ms ease-out, background-color 120ms ease-out;
+}
+
+.menu-top:hover:not(:disabled) {
+  color: var(--ph-bloom);
+  background-color: var(--ph-hair);
+}
+
+.menu-top:disabled {
+  color: var(--ph-faint);
+}
+
+.menu-top-open,
+.menu-top-open:hover {
+  color: var(--ph-bloom);
+  background-color: var(--ph-hair);
+}
+
+.menu-dropdown {
+  top: 100%;
+  min-width: 236px;
+  background-color: var(--ph-panel);
+  border: 1px solid var(--ph-faint);
+  border-radius: var(--radius-panel);
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
+}
+
+.menu-item {
+  font-size: 12px;
+  color: var(--ph-mid);
+  padding: 6px 10px;
+  border-radius: var(--radius-control);
+}
+
+.menu-item:hover:not(:disabled) {
+  color: var(--ph-bloom);
+  background-color: var(--ph-hair);
+}
+
+.menu-item:disabled {
+  color: var(--ph-faint);
+}
+
+.menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background-color: var(--ph-hair);
+}
+
+.menu-section-label {
+  padding: 6px 10px 2px;
+}
+
+.menu-empty {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--ph-dim);
+  padding: 2px 10px 6px;
+}
+
+.menu-bookmarks {
+  max-height: 208px;
+}
+
+.menu-bookmark {
+  border-radius: var(--radius-control);
+}
+
+.menu-bookmark:hover {
+  background-color: var(--ph-hair);
+}
+
+.menu-bookmark-tune {
+  font-size: 12px;
+  color: var(--ph-mid);
+  padding: 4px 10px;
+}
+
+.menu-bookmark-tune:hover {
+  color: var(--ph-bloom);
+}
+
+.menu-bookmark-freq,
+.menu-item-freq {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ph-dim);
+}
+
+.menu-bookmark-delete {
+  color: var(--ph-dim);
+  font-size: 13px;
+  padding: 0 8px;
+}
+
+.menu-bookmark-delete:hover {
+  color: var(--ph-bright);
+}
+
+.menu-item-check input[type="checkbox"] {
+  accent-color: var(--ph-bright);
+  width: 14px;
+  height: 14px;
+}
+
+.menu-rec-dot {
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  background-color: var(--ph-bright);
+}
+
+/* -------- Waterfall + spectrum -------- */
+
+.waterfall {
+  gap: 0;
+}
+
+.waterfall-header {
+  padding: 0 0 8px;
+  min-height: 24px;
+}
+
+.waterfall-status {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ph-dim);
+}
+
+.waterfall-error {
+  color: var(--ph-bright);
+}
+
+.waterfall-ok {
+  color: var(--ph-dim);
+}
+
+.waterfall-pending {
+  color: var(--ph-dim);
+}
+
+.wf-range-controls {
+  gap: 8px;
+}
+
+.wf-range-value {
+  font-size: 11px;
+  color: var(--ph-mid);
+  font-variant-numeric: tabular-nums;
+  min-width: 3.6ch;
+}
+
+.wf-range-slider {
+  width: 64px;
+  height: 2px;
+  background-color: var(--ph-hair);
+  border-radius: 0;
+}
+
+.wf-range-slider::-webkit-slider-thumb {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ph-mid);
+}
+
+.wf-range-slider::-moz-range-thumb {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: none;
+  background: var(--ph-mid);
+}
+
+.spectrum-wrap {
+  background-color: var(--ph-void);
+  border: 1px solid var(--ph-hair);
+  border-bottom: none;
+  border-radius: var(--radius-panel) var(--radius-panel) 0 0;
+}
+
+.spectrum-canvas {
+  height: 90px;
+}
+
+.freq-axis-canvas,
+.band-guide-axis,
+.filter-band-marker {
+  background-color: var(--ph-void);
+  border-top: 1px solid var(--ph-hair);
+}
+
+.freq-axis-canvas {
+  height: 21px;
+}
+
+.filter-band-marker {
+  height: 20px;
+}
+
+.waterfall-canvas {
+  background-color: var(--ph-void);
+  border: 1px solid var(--ph-hair);
+  border-radius: 0 0 var(--radius-panel) var(--radius-panel);
+}
+
+/* Band guide: one quiet row. Active chips use text weight, not fill. */
+.band-guide-controls {
+  background-color: var(--ph-void);
+  border-top: 1px solid var(--ph-hair);
+  padding: 0 4px;
+  gap: 2px;
+  min-height: 28px;
+}
+
+.band-guide-sep {
+  width: 1px;
+  height: 12px;
+  margin: 0 6px;
+  background-color: var(--ph-hair);
+}
+
+.band-guide-toggle,
+.band-guide-pill {
+  min-height: 24px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ph-dim);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-control);
+  padding: 0 6px;
+  transition: color 120ms ease-out, background-color 120ms ease-out;
+}
+
+.band-guide-toggle:hover,
+.band-guide-pill:hover {
+  color: var(--ph-bloom);
+  background-color: var(--ph-hair);
+}
+
+.band-guide-toggle.is-active {
+  color: var(--ph-bright);
+}
+
+.band-guide-pill.is-active {
+  color: var(--ph-bright);
+  background-color: var(--ph-hair);
+}
+
+/* -------- Signal meter -------- */
+
+.signal-meter {
+  gap: 8px;
+  padding: 10px 8px;
+}
+
+.signal-meter-header {
+  text-align: left;
+}
+
+.signal-meter-body {
+  gap: 6px;
+  padding: 0;
+}
+
+.signal-meter-ticks {
+  width: 24px;
+  font-size: 11px;
+  color: var(--ph-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.signal-meter-bar {
+  background-color: var(--ph-void);
+  border: 1px solid var(--ph-hair);
+  border-radius: var(--radius-control);
+}
+
+.signal-meter-fill {
+  background-color: var(--ph-mid);
+  transition: height 80ms linear;
+}
+
+.signal-meter-peak {
+  height: 2px;
+  background-color: var(--ph-bloom);
+}
+
+.signal-meter-readout {
+  gap: 2px;
+  align-items: flex-start;
+}
+
+.signal-meter-current {
+  color: var(--ph-bloom);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.signal-meter-peak-text {
+  color: var(--ph-dim);
+  font-size: 11px;
+}
+
+/* -------- Scanner -------- */
+
+.scanner-panel {
+  gap: 8px 20px;
+  padding: 8px 16px;
+}
+
+.scanner-fields {
+  gap: 8px 24px;
+}
+
+.scanner-field-row {
+  display: grid;
+  grid-template-columns: auto 64px auto auto 64px auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.scanner-input {
+  text-align: right;
+}
+
+.scanner-unit {
+  font-size: 11px;
+  color: var(--ph-dim);
+}
+
+.scanner-footer {
+  gap: 8px;
+}
+
+.scanner-btn {
+  min-height: 26px;
+  padding: 0 14px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-radius: var(--radius-control);
+  transition: color 120ms ease-out, background-color 120ms ease-out;
+}
+
+.scanner-btn-start {
+  background: transparent;
+  border: 1px solid var(--ph-bright);
+  color: var(--ph-bright);
+}
+
+.scanner-btn-start:hover:not(:disabled) {
+  background-color: var(--ph-bright);
+  color: var(--ph-ink);
+}
+
+.scanner-btn-stop {
+  background-color: var(--ph-bright);
+  border: 1px solid var(--ph-bright);
+  color: var(--ph-ink);
+}
+
+.scanner-btn:disabled {
+  opacity: 1;
+  color: var(--ph-faint);
+  border-color: var(--ph-hair);
+  background: transparent;
+}
+
+.scanner-status {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--ph-dim);
+}
+
+.scanner-nav-btn {
+  width: 24px;
+  min-height: 24px;
+  border: 1px solid var(--ph-hair);
+  border-radius: var(--radius-control);
+  color: var(--ph-mid);
+  font-size: 13px;
+}
+
+.scanner-nav-btn:hover:not(:disabled) {
+  color: var(--ph-bloom);
+  border-color: var(--ph-faint);
+}
+
+.scanner-nav-btn:disabled {
+  opacity: 1;
+  color: var(--ph-faint);
+}
+
+.scanner-nav-label {
+  font-size: 11px;
+  color: var(--ph-mid);
+  font-variant-numeric: tabular-nums;
+}
+
+.band-activity-canvas {
+  height: 28px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--ph-hair);
+  background-color: var(--ph-void);
+}
+
+/* -------- Transport (IQ replay) -------- */
+
+.transport-btn {
+  min-height: 26px;
+  padding: 0 12px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ph-mid);
+  background: transparent;
+  border: 1px solid var(--ph-faint);
+  border-radius: var(--radius-control);
+  transition: color 120ms ease-out, background-color 120ms ease-out;
+}
+
+.transport-btn:hover {
+  color: var(--ph-ink);
+  background-color: var(--ph-bright);
+}
+
+.transport-slider {
+  accent-color: var(--ph-bright);
+}
+
+.transport-time {
+  font-size: 12px;
+  color: var(--ph-bloom);
+  min-width: 76px;
+}
+
+.transport-meta {
+  font-size: 11px;
+  color: var(--ph-dim);
+}
+
+/* -------- Scrollbars inside dropdowns -------- */
+
+.menu-bookmarks::-webkit-scrollbar {
+  width: 6px;
+}
+
+.menu-bookmarks::-webkit-scrollbar-track {
+  background: var(--ph-void);
+}
+
+.menu-bookmarks::-webkit-scrollbar-thumb {
+  background: var(--ph-faint);
+  border-radius: 3px;
+}
+
+/* -------- Selection / focus -------- */
+
+::selection {
+  background-color: var(--ph-bright);
+  color: var(--ph-ink);
+}
+
+.app :focus-visible {
+  outline: 1px solid var(--ph-bright);
+  outline-offset: 1px;
+}

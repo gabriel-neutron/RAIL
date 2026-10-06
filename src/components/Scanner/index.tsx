@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Channel } from "@tauri-apps/api/core";
-import { startScan, stopScan } from "../../ipc/commands";
+import { subscribeIpcEvent } from "../../ipc/events";
 import {
-  subscribeScanComplete,
-  subscribeScanStep,
-  subscribeScanStopped,
-} from "../../ipc/events";
+  EVENT_SCAN_COMPLETE,
+  EVENT_SCAN_STEP,
+  EVENT_SCAN_STOPPED,
+} from "../../ipc/generated/events";
 import { useRadioStore } from "../../store/radio";
 import { useScannerStore } from "../../store/scanner";
 import BandActivity from "./BandActivity";
@@ -17,10 +16,10 @@ export const Scanner = () => {
   const scanning = useScannerStore((s) => s.scanning);
   const frequenciesHz = useScannerStore((s) => s.frequenciesHz);
   const results = useScannerStore((s) => s.results);
-  const beginScan = useScannerStore((s) => s.beginScan);
   const endScan = useScannerStore((s) => s.endScan);
   const scanConfig = useScannerStore((s) => s.scanConfig);
-  const scanConfigSeq = useScannerStore((s) => s.scanConfigSeq);
+  const runScanSession = useScannerStore((s) => s.runScanSession);
+  const cancelScanSession = useScannerStore((s) => s.cancelScanSession);
 
   const [startMhz, setStartMhz] = useState(() =>
     (scanConfig.startHz / 1e6).toFixed(1),
@@ -39,16 +38,18 @@ export const Scanner = () => {
   const [selectedIdx, setSelectedIdx] = useState(-1);
 
   // When a band-menu click pushes new config, sync the form fields.
-  // scanConfigSeq changes only on external setScanConfig calls, not on
-  // user edits, so this never fights with in-progress typing.
-  useEffect(() => {
+  // Object identity is the signal: only setScanConfig replaces the
+  // object, and it must keep allocating a fresh one. User typing lives
+  // in local state, so this never fights with an edit in progress.
+  const [prevScanConfig, setPrevScanConfig] = useState(scanConfig);
+  if (scanConfig !== prevScanConfig) {
+    setPrevScanConfig(scanConfig);
     setStartMhz((scanConfig.startHz / 1e6).toFixed(1));
     setStopMhz((scanConfig.stopHz / 1e6).toFixed(1));
     setStepKhz(String(Math.round(scanConfig.stepHz / 1e3)));
     setDwellMs(String(scanConfig.dwellMs));
     setThresholdSnrDb(String(scanConfig.thresholdSnrDb));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanConfigSeq]);
+  }
 
   // Ref so event callbacks always see the current threshold (SNR dB).
   const thresholdRef = useRef(scanConfig.thresholdSnrDb);
@@ -73,13 +74,6 @@ export const Scanner = () => {
       ? detectedSignals[selectedIdx].frequencyHz
       : undefined;
 
-  const channelRef = useRef<Channel<ArrayBuffer> | null>(null);
-  const freqsRef = useRef<number[]>([]);
-
-  useEffect(() => {
-    freqsRef.current = frequenciesHz;
-  }, [frequenciesHz]);
-
   // Subscribe to all scanner events.
   useEffect(() => {
     let unlistenStep: (() => void) | undefined;
@@ -87,12 +81,14 @@ export const Scanner = () => {
     let unlistenStopped: (() => void) | undefined;
     let cancelled = false;
 
-    // Keep the radio store in sync with every hardware retune the scanner
-    // performs. FrequencyAxis, FilterBandMarker, and FrequencyControl all
-    // read from that store, so they update automatically without any
-    // direct coupling to the scanner.
-    void subscribeScanStep((payload) => {
-      useRadioStore.getState().setFrequency(payload.frequencyHz);
+    // Mirror every hardware retune the scanner performs into the radio
+    // store for display only. FrequencyAxis, FilterBandMarker, and
+    // FrequencyControl read from that store. Going through setFrequency
+    // would schedule a second retune of a frequency the scanner has
+    // already tuned, landing inside its settle window and re-locking the
+    // PLL under the measurement it is taking.
+    void subscribeIpcEvent(EVENT_SCAN_STEP, (payload) => {
+      useRadioStore.getState().syncFrequencyFromBackend(payload.frequencyHz);
     }).then((fn) => {
       if (cancelled) fn();
       else unlistenStep = fn;
@@ -107,7 +103,7 @@ export const Scanner = () => {
       }
     };
 
-    void subscribeScanComplete(() => {
+    void subscribeIpcEvent(EVENT_SCAN_COMPLETE, () => {
       endScan();
       setStatusText("Done");
       autoSelect();
@@ -116,7 +112,7 @@ export const Scanner = () => {
       else unlistenComplete = fn;
     });
 
-    void subscribeScanStopped((payload) => {
+    void subscribeIpcEvent(EVENT_SCAN_STOPPED, (payload) => {
       endScan();
       setStatusText(`Stopped — ${(payload.frequencyHz / 1e6).toFixed(3)} MHz`);
       autoSelect();
@@ -150,44 +146,21 @@ export const Scanner = () => {
     }
 
     setSelectedIdx(-1);
-    const channel = new Channel<ArrayBuffer>();
-    channelRef.current = channel;
-
-    channel.onmessage = (buffer: ArrayBuffer) => {
-      const view = new DataView(buffer);
-      const signalAvgDb = view.getFloat32(0, true);
-      const noiseFloorDb = view.getFloat32(4, true);
-      const freqs = freqsRef.current;
-      const idx = useScannerStore.getState().results.length;
-      if (idx < freqs.length) {
-        useScannerStore
-          .getState()
-          .pushResult({ frequencyHz: freqs[idx], signalAvgDb, noiseFloorDb });
-      }
-    };
-
-    try {
-      setStatusText("Starting…");
-      const reply = await startScan(
-        { startHz, stopHz, stepHz, dwellMs: dwell, squelchSnrDb: null },
-        channel,
-      );
-      beginScan(reply.frequenciesHz);
-      setStatusText("Scanning…");
-    } catch (err) {
-      setStatusText(`Error: ${String(err)}`);
-    }
-  }, [startMhz, stopMhz, stepKhz, dwellMs, beginScan]);
+    setStatusText("Starting…");
+    const outcome = await runScanSession({
+      startHz,
+      stopHz,
+      stepHz,
+      dwellMs: dwell,
+      squelchSnrDb: null,
+    });
+    setStatusText(outcome.ok ? "Scanning…" : `Error: ${outcome.message}`);
+  }, [startMhz, stopMhz, stepKhz, dwellMs, runScanSession]);
 
   const handleStop = useCallback(async () => {
-    try {
-      await stopScan();
-    } catch (err) {
-      console.warn("[RAIL] stopScan failed:", err);
-    }
-    endScan();
+    await cancelScanSession();
     setStatusText("Stopped");
-  }, [endScan]);
+  }, [cancelScanSession]);
 
   const handleTune = useCallback(
     (frequencyHz: number) => {
@@ -293,15 +266,15 @@ export const Scanner = () => {
         </div>
       </div>
 
-      <div className="scanner-separator" role="separator" />
-
-      <BandActivity
-        frequenciesHz={frequenciesHz}
-        results={results}
-        threshold={threshold}
-        selectedFrequencyHz={selectedFrequencyHz}
-        onTune={handleTune}
-      />
+      {frequenciesHz.length > 0 && (
+        <BandActivity
+          frequenciesHz={frequenciesHz}
+          results={results}
+          threshold={threshold}
+          selectedFrequencyHz={selectedFrequencyHz}
+          onTune={handleTune}
+        />
+      )}
 
       <div className="scanner-footer">
         <button

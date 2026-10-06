@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { buildColormapLut } from "../Waterfall/colormap";
 import type { ScanResult } from "../../store/scanner";
+import {
+  cellCenterX,
+  cellLeftX,
+  xToCellIndexClamped,
+} from "../../viewport/cellAxis";
 
 const SNR_FLOOR = 0;
 const SNR_CEIL = 40;
@@ -54,8 +59,8 @@ export const BandActivity = ({
     for (let i = 0; i < n; i += 1) {
       const freq = frequenciesHz[i];
       const data = resultsMap.get(freq);
-      const x = Math.round((i / n) * w);
-      const nextX = Math.round(((i + 1) / n) * w);
+      const x = Math.round(cellLeftX(i, n, w));
+      const nextX = Math.round(cellLeftX(i + 1, n, w));
       const segW = Math.max(1, nextX - x);
 
       if (data === undefined) {
@@ -77,7 +82,7 @@ export const BandActivity = ({
       const freq = frequenciesHz[i];
       const data = resultsMap.get(freq);
       if (data !== undefined && (data.signalAvgDb - data.noiseFloorDb) > threshold) {
-        const x = Math.round(((i + 0.5) / n) * w);
+        const x = Math.round(cellCenterX(i, n, w));
         // White for the currently selected signal, cyan for the rest.
         ctx.strokeStyle = freq === selectedFrequencyHz ? "#ffffff" : "#7ee7ff";
         ctx.beginPath();
@@ -93,10 +98,11 @@ export const BandActivity = ({
       const canvas = canvasRef.current;
       if (!canvas || frequenciesHz.length === 0) return;
       const rect = canvas.getBoundingClientRect();
-      const ratio = (e.clientX - rect.left) / rect.width;
-      const idx = Math.max(
-        0,
-        Math.min(frequenciesHz.length - 1, Math.round(ratio * (frequenciesHz.length - 1))),
+      if (rect.width <= 0) return;
+      const idx = xToCellIndexClamped(
+        e.clientX - rect.left,
+        frequenciesHz.length,
+        rect.width,
       );
       onTune(frequenciesHz[idx]);
     },

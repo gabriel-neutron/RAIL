@@ -9,6 +9,15 @@ import FrequencyAxis from "../FrequencyAxis";
 import BandGuideAxis from "../BandGuideAxis";
 import BandGuideControls from "../BandGuideControls";
 import Spectrum from "../Spectrum";
+import { prepareCanvas2d } from "../../viewport/canvasSizing";
+import {
+  binLeftX,
+  createSpectrumViewport,
+  cropWindow,
+  retuneShiftPx,
+  spanHz,
+  xToBinIndex,
+} from "../../viewport/spectrumViewport";
 import { buildColormapLut } from "./colormap";
 
 const WATERFALL_HEIGHT = 360;
@@ -35,14 +44,10 @@ type WaterfallProps = {
   onAudio?: (frame: Float32Array) => void;
 };
 
-/// Crop the center `len/zoom` bins of a shifted FFT frame. After the
-/// `fs/4` digital mixer + FFT shift, the user's target sits at bin
-/// `N/2`, so a symmetric slice around the middle keeps the tuned
-/// signal centered at any zoom level (docs/DSP.md §1–3).
+/// Crop a shifted FFT frame to the window the viewport labels
+/// (`cropWindow`, docs/DSP.md §1–3 and §9.5).
 const cropCenter = (frame: Float32Array, zoom: number): Float32Array => {
-  if (zoom <= 1) return frame;
-  const kept = Math.max(16, Math.floor(frame.length / zoom));
-  const start = Math.floor((frame.length - kept) / 2);
+  const { start, kept } = cropWindow(frame.length, zoom);
   return frame.subarray(start, start + kept);
 };
 
@@ -96,6 +101,7 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
 
   const zoom = useRadioStore((s) => s.zoom);
   const sampleRateHz = useRadioStore((s) => s.sampleRateHz);
+  const fftSize = useRadioStore((s) => s.fftSize);
   const frequencyHz = useRadioStore((s) => s.frequencyHz);
   /// Bumped by the replay store on open / seek / loop. While replaying
   /// an IQ file we want the waterfall's Y-axis to track file time, not
@@ -171,6 +177,28 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
     avgFrameRef.current = null;
   }, [frequencyHz]);
 
+  // History rows keep the column they were painted at. Slide them with the
+  // centre so they stay on their true frequency instead of ghosting at the
+  // wrong one under the new axis. A drag does this itself (CSS shift baked in
+  // on release): it records the frequency it tunes to in this ref, so the
+  // effect sees no change and cannot double-shift, however late React runs it.
+  const previousFrequencyHzRef = useRef(frequencyHz);
+  useEffect(() => {
+    const previousHz = previousFrequencyHzRef.current;
+    previousFrequencyHzRef.current = frequencyHz;
+    const canvas = waterfallCanvasRef.current;
+    if (!canvas || previousHz === frequencyHz) return;
+    const view = createSpectrumViewport({
+      centerHz: frequencyHz,
+      sampleRateHz,
+      zoom,
+      fftSize,
+      cssWidthPx: canvas.width,
+    });
+    if (view === null) return;
+    shiftCanvasContent(canvas, retuneShiftPx(view, previousHz, frequencyHz));
+  }, [frequencyHz, sampleRateHz, zoom, fftSize]);
+
   // Register a PNG screenshot source with the capture store so the
   // "save screenshot" menu entry can grab the waterfall without
   // reaching into component refs. A 32 px header bar is composited
@@ -225,10 +253,19 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
   } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
-  const pxToOffsetHz = (px: number, rectWidth: number): number => {
+  /// Build the viewport a pointer gesture should measure against, from the
+  /// store as it stands at event time. Read live inside the handler, never
+  /// hoisted into a prop or a render-phase value: a drag retunes as it moves,
+  /// so a viewport captured at render would be stale by the next event.
+  const viewportForPointer = (rectWidth: number) => {
     const store = useRadioStore.getState();
-    const displayedSpan = store.sampleRateHz / store.zoom;
-    return (px / rectWidth) * displayedSpan;
+    return createSpectrumViewport({
+      centerHz: store.frequencyHz,
+      sampleRateHz: store.sampleRateHz,
+      zoom: store.zoom,
+      fftSize: store.fftSize,
+      cssWidthPx: rectWidth,
+    });
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -263,8 +300,15 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
     // px→Hz mapping to feel like panning a map. Live retune updates
     // the axis + spectrum + marker; CSS transform visually shifts
     // the cached waterfall rows to follow the cursor.
-    const deltaHz = -pxToOffsetHz(deltaPx, rect.width);
-    useRadioStore.getState().setFrequency(drag.startHz + deltaHz);
+    // `pxWidthToHz` is relative — span only, no centre term — so the offset
+    // stays measured from `drag.startHz` and the retune cannot feed back into
+    // the next move's mapping.
+    const view = viewportForPointer(rect.width);
+    if (view === null) return;
+    const deltaHz = -view.pxWidthToHz(deltaPx);
+    const targetHz = Math.max(0, Math.round(drag.startHz + deltaHz));
+    previousFrequencyHzRef.current = targetHz;
+    useRadioStore.getState().setFrequency(targetHz);
     canvas.style.transform = `translateX(${deltaPx}px)`;
   };
 
@@ -288,6 +332,9 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
       // breaking continuity with rows that arrive post-release.
       const deltaPxScreen = e.clientX - drag.startX;
       const rect = canvas.getBoundingClientRect();
+      // Backing store to CSS pixels. This is 1:1 only because the waterfall
+      // canvas is prepared at pixelRatio 1 (see viewport/canvasSizing.ts);
+      // a future DPR change has to keep this ratio in step.
       const scale = rect.width > 0 ? canvas.width / rect.width : 1;
       const deltaPxCanvas = Math.round(deltaPxScreen * scale);
       if (deltaPxCanvas !== 0) {
@@ -305,28 +352,28 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
     if (rect.width <= 0) return;
     const store = useRadioStore.getState();
     if (!store.streaming) return;
+    const view = viewportForPointer(rect.width);
+    if (view === null) return;
     const offsetPx = e.clientX - rect.left - rect.width / 2;
-    store.setFrequency(store.frequencyHz + pxToOffsetHz(offsetPx, rect.width));
+    store.setFrequency(store.frequencyHz + view.pxWidthToHz(offsetPx));
   };
 
-  const displayedSpanHz = sampleRateHz / zoom;
+  const displayedSpanHz = spanHz(sampleRateHz, zoom, fftSize);
 
   return (
     <section className="waterfall">
       <div className="waterfall-header">
         <div className="waterfall-status">
           {error && (
-            <span className="waterfall-error">stream error: {error}</span>
+            <span className="waterfall-error">Stream error: {error}</span>
           )}
           {!error && session === null && (
-            <span className="waterfall-pending">opening stream…</span>
+            <span className="waterfall-pending">Opening stream…</span>
           )}
           {!error && session && (
             <span className="waterfall-ok">
-              fs={(session.sampleRateHz / 1e6).toFixed(3)} MHz · N=
-              {session.fftSize} · span=
-              {(displayedSpanHz / 1e6).toFixed(3)} MHz · zoom=
-              {zoom.toFixed(1)}x · DC ±{(session.sampleRateHz / 4 / 1e6).toFixed(3)} MHz
+              span {(displayedSpanHz / 1e6).toFixed(3)} MHz · zoom{" "}
+              {zoom.toFixed(1)}×
             </span>
           )}
         </div>
@@ -355,7 +402,6 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
             aria-label="Waterfall ceiling dBFS"
           />
           <span className="wf-range-value">{dbCeil}</span>
-          <span className="wf-range-label wf-range-sep">|</span>
           <span className="wf-range-label">Smooth</span>
           <input
             type="range"
@@ -423,19 +469,12 @@ function drawWaterfallRow(
   dbCeil: number,
 ): void {
   if (!canvas) return;
-  const ctx = canvas.getContext("2d", { alpha: false });
-  if (!ctx) return;
-
-  // Fill the full CSS-rendered width so zoom never produces a tiny
-  // buffer that the browser has to upscale. clientWidth is 0 before
-  // first layout; fall back to the current attribute width in that case.
-  const targetW = canvas.clientWidth > 0 ? canvas.clientWidth : canvas.width;
-  if (canvas.width !== targetW) {
-    canvas.width = targetW;
-  }
-  if (canvas.height !== WATERFALL_HEIGHT) {
-    canvas.height = WATERFALL_HEIGHT;
-  }
+  // Prepared at pixelRatio 1: this canvas draws in backing-store pixels and
+  // stays 1:1 with its CSS size for the reason documented in
+  // viewport/canvasSizing.ts (the per-frame LUT loop scales with width).
+  const prepared = prepareCanvas2d(canvas, WATERFALL_HEIGHT, 1, { alpha: false });
+  if (!prepared) return;
+  const { ctx } = prepared;
 
   if (
     rowImageRef.current === null ||
@@ -453,7 +492,7 @@ function drawWaterfallRow(
   const binCount = frame.length;
   const canvasW = canvas.width;
   for (let x = 0; x < canvasW; x += 1) {
-    const binIdx = Math.floor((x * binCount) / canvasW);
+    const binIdx = xToBinIndex(x, binCount, canvasW);
     const normalized = Math.max(
       0,
       Math.min(1, (frame[binIdx] - dbFloor) / span),
@@ -513,16 +552,10 @@ function drawSpectrum(
   dbCeil: number,
 ): void {
   if (!canvas) return;
-  const ctx = canvas.getContext("2d", { alpha: true });
-  if (!ctx) return;
-
-  const targetW = canvas.clientWidth > 0 ? canvas.clientWidth : canvas.width;
-  if (canvas.width !== targetW) {
-    canvas.width = targetW;
-  }
-  if (canvas.height !== SPECTRUM_HEIGHT) {
-    canvas.height = SPECTRUM_HEIGHT;
-  }
+  // Also pixelRatio 1 — same reason as the waterfall row above.
+  const prepared = prepareCanvas2d(canvas, SPECTRUM_HEIGHT, 1, { alpha: true });
+  if (!prepared) return;
+  const { ctx } = prepared;
 
   const w = canvas.width;
   const h = canvas.height;
@@ -533,12 +566,12 @@ function drawSpectrum(
     const n = Math.max(0, Math.min(1, (db - dbFloor) / span));
     return h - n * h;
   };
-  const binToX = (i: number): number => (i / frame.length) * w;
+  const binToX = (i: number): number => binLeftX(i, frame.length, w);
 
   // Filled area under the curve.
   const gradient = ctx.createLinearGradient(0, 0, 0, h);
-  gradient.addColorStop(0, "rgba(58, 160, 255, 0.55)");
-  gradient.addColorStop(1, "rgba(58, 160, 255, 0.04)");
+  gradient.addColorStop(0, "rgba(255, 178, 41, 0.28)");
+  gradient.addColorStop(1, "rgba(255, 178, 41, 0.02)");
   ctx.fillStyle = gradient;
   ctx.beginPath();
   ctx.moveTo(0, h);
@@ -550,7 +583,7 @@ function drawSpectrum(
   ctx.fill();
 
   // Curve on top.
-  ctx.strokeStyle = "rgba(156, 205, 255, 0.9)";
+  ctx.strokeStyle = "rgba(255, 178, 41, 0.9)";
   ctx.lineWidth = 1;
   ctx.beginPath();
   for (let i = 0; i < frame.length; i += 1) {

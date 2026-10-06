@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { Channel } from "@tauri-apps/api/core";
 
 import type { Bookmark } from "../../ipc/commands";
-import { startScan } from "../../ipc/commands";
 import { BAND_ENTRIES } from "../../data/bands";
 import { useBookmarksStore } from "../../store/bookmarks";
 import { useCaptureStore } from "../../store/capture";
 import { useRadioStore, type DemodMode } from "../../store/radio";
 import { useReplayStore } from "../../store/replay";
 import { useScannerStore } from "../../store/scanner";
+import { formatHz } from "../../viewport/formatHz";
 
 type MenuKey = "file" | "view" | "bookmarks" | "capture" | "bands" | "settings";
 
@@ -23,11 +22,8 @@ const BANDS: Band[] = BAND_ENTRIES.filter((b) => b.priority <= 2).map((b) => ({
 const BOOKMARK_FILE_VERSION = 1;
 const BOOKMARK_EXPORT_NAME = "rail-bookmarks.json";
 
-const formatFrequency = (hz: number): string => {
-  if (hz >= 1_000_000) return `${(hz / 1_000_000).toFixed(3)} MHz`;
-  if (hz >= 1_000) return `${(hz / 1_000).toFixed(3)} kHz`;
-  return `${hz} Hz`;
-};
+// Bookmarks list in a column, so their frequencies keep a fixed width.
+const formatFrequency = (hz: number): string => formatHz(hz, { digits: 3 });
 
 /// Coerce anything we read from a user-supplied JSON into a safe
 /// `Bookmark[]`. Accepts either `{ bookmarks: [...] }` (our own save
@@ -202,9 +198,9 @@ export const MenuBar = () => {
 
   const handleBandClick = async (band: Band) => {
     setOpen(null);
-    if (!streaming) return;
     useRadioStore.getState().setFrequency(band.centerHz);
     if (!classifierEnabled) return;
+    if (!useRadioStore.getState().canTouchHardware()) return;
     const startHz = Math.max(500_000, band.centerHz - band.scanRangeHz);
     const stopHz = band.centerHz + band.scanRangeHz;
     const scannerStore = useScannerStore.getState();
@@ -216,25 +212,15 @@ export const MenuBar = () => {
       thresholdSnrDb: 10,
     });
     if (!scannerStore.visible) scannerStore.toggleVisible();
-    const channel = new Channel<ArrayBuffer>();
-    try {
-      const reply = await startScan(
-        { startHz, stopHz, stepHz: 200_000, dwellMs: 200, squelchSnrDb: null },
-        channel,
-      );
-      useScannerStore.getState().beginScan(reply.frequenciesHz);
-      const freqs = reply.frequenciesHz;
-      channel.onmessage = (buffer: ArrayBuffer) => {
-        const view = new DataView(buffer);
-        const signalAvgDb = view.getFloat32(0, true);
-        const noiseFloorDb = view.getFloat32(4, true);
-        const idx = useScannerStore.getState().results.length;
-        if (idx < freqs.length) {
-          useScannerStore.getState().pushResult({ frequencyHz: freqs[idx], signalAvgDb, noiseFloorDb });
-        }
-      };
-    } catch (err) {
-      console.warn("[RAIL] band scan failed:", err);
+    const outcome = await scannerStore.runScanSession({
+      startHz,
+      stopHz,
+      stepHz: 200_000,
+      dwellMs: 200,
+      squelchSnrDb: null,
+    });
+    if (!outcome.ok) {
+      console.warn("[RAIL] band scan failed:", outcome.message);
     }
   };
 

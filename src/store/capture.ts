@@ -7,7 +7,6 @@
 ///                          `discard_capture`.
 /// - IQ recording         → same as audio but with a SigMF meta+data pair.
 
-import { save } from "@tauri-apps/plugin-dialog";
 import { create } from "zustand";
 
 import {
@@ -21,6 +20,7 @@ import {
   stopAudioCapture,
   stopIqCapture,
 } from "../ipc/commands";
+import { transport } from "../ipc/transport";
 import { useRadioStore } from "./radio";
 
 type ScreenshotProvider = () => Promise<Blob | null>;
@@ -86,7 +86,7 @@ export const useCaptureStore = create<CaptureState>((set, get) => ({
     set({ recordingAudio: false });
 
     try {
-      const dst = await save({
+      const dst = await transport().pickSavePath({
         defaultPath: info.suggestedName,
         filters: [{ name: "WAV", extensions: ["wav"] }],
       });
@@ -125,7 +125,7 @@ export const useCaptureStore = create<CaptureState>((set, get) => ({
     set({ recordingIq: false });
 
     try {
-      const dst = await save({
+      const dst = await transport().pickSavePath({
         defaultPath: info.suggestedName,
         filters: [{ name: "SigMF data", extensions: ["sigmf-data"] }],
       });
@@ -174,7 +174,7 @@ export const useCaptureStore = create<CaptureState>((set, get) => ({
     }
 
     try {
-      const dst = await save({
+      const dst = await transport().pickSavePath({
         defaultPath: suggestedName,
         filters: [{ name: "PNG", extensions: ["png"] }],
       });

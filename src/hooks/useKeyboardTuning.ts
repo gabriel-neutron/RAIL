@@ -1,7 +1,5 @@
 import { useEffect } from "react";
-import { Channel } from "@tauri-apps/api/core";
 
-import { startScan } from "../ipc/commands";
 import { UNIT_SCALE, useRadioStore } from "../store/radio";
 import { useScannerStore } from "../store/scanner";
 
@@ -43,25 +41,13 @@ export const useKeyboardTuning = (): void => {
         const scannerStore = useScannerStore.getState();
         scannerStore.setScanConfig({ startHz, stopHz, stepHz, dwellMs: 200, thresholdSnrDb: 10 });
         if (!scannerStore.visible) scannerStore.toggleVisible();
-        const channel = new Channel<ArrayBuffer>();
-        void startScan(
-          { startHz, stopHz, stepHz, dwellMs: 200, squelchSnrDb: null },
-          channel,
-        ).then((reply) => {
-          useScannerStore.getState().beginScan(reply.frequenciesHz);
-          const freqs = reply.frequenciesHz;
-          channel.onmessage = (buffer: ArrayBuffer) => {
-            const view = new DataView(buffer);
-            const signalAvgDb = view.getFloat32(0, true);
-            const noiseFloorDb = view.getFloat32(4, true);
-            const idx = useScannerStore.getState().results.length;
-            if (idx < freqs.length) {
-              useScannerStore.getState().pushResult({ frequencyHz: freqs[idx], signalAvgDb, noiseFloorDb });
+        void scannerStore
+          .runScanSession({ startHz, stopHz, stepHz, dwellMs: 200, squelchSnrDb: null })
+          .then((outcome) => {
+            if (!outcome.ok) {
+              console.warn("[RAIL] quick scan failed:", outcome.message);
             }
-          };
-        }).catch((err) => {
-          console.warn("[RAIL] quick scan failed:", err);
-        });
+          });
         return;
       }
 

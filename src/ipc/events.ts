@@ -1,116 +1,18 @@
-// Typed wrappers for Tauri events (Rust → React).
-// Event names and payload shapes defined in docs/ARCHITECTURE.md §3.
+// The single subscribe seam for named Tauri events (Rust → React).
+//
+// Wire names and payload shapes are generated from shared/ipc_events.json
+// into ./generated/events — import those directly, this module deliberately
+// does not re-export them.
+//
 // Waterfall frames travel on a per-session Channel (see ipc/commands.ts),
 // not on the event bus.
-//
-// String literals: shared/ipc_event_names.json (see scripts/gen-ipc-event-names.mjs).
 
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-import {
-  EVENT_DEVICE_STATUS,
-  EVENT_REPLAY_POSITION,
-  EVENT_SCAN_COMPLETE,
-  EVENT_SCAN_STEP,
-  EVENT_SCAN_STOPPED,
-  EVENT_SIGNAL_CLASSIFICATION,
-  EVENT_SIGNAL_LEVEL,
-} from "./generated/eventNames";
+import type { IpcEventName, IpcEventPayloads } from "./generated/events";
 
-export {
-  EVENT_DEVICE_STATUS,
-  EVENT_REPLAY_POSITION,
-  EVENT_SCAN_COMPLETE,
-  EVENT_SCAN_STEP,
-  EVENT_SCAN_STOPPED,
-  EVENT_SIGNAL_CLASSIFICATION,
-  EVENT_SIGNAL_LEVEL,
-};
-
-export type DeviceStatusPayload = {
-  connected: boolean;
-  error?: string;
-};
-
-export const subscribeDeviceStatus = (
-  handler: (payload: DeviceStatusPayload) => void,
+export const subscribeIpcEvent = <K extends IpcEventName>(
+  name: K,
+  handler: (payload: IpcEventPayloads[K]) => void,
 ): Promise<UnlistenFn> =>
-  listen<DeviceStatusPayload>(EVENT_DEVICE_STATUS, (evt) =>
-    handler(evt.payload),
-  );
-
-/// Periodic dBFS level + decaying peak-hold. Backend decays peak by
-/// ~1 dB per emission at ~25 Hz (see `MIN_LEVEL_EMIT_INTERVAL` in
-/// `src-tauri/src/ipc/commands.rs`).
-export type SignalLevelPayload = {
-  current: number;
-  peak: number;
-};
-
-export const subscribeSignalLevel = (
-  handler: (payload: SignalLevelPayload) => void,
-): Promise<UnlistenFn> =>
-  listen<SignalLevelPayload>(EVENT_SIGNAL_LEVEL, (evt) =>
-    handler(evt.payload),
-  );
-
-/// IQ-replay transport position. Backend emits at ~25 Hz from the
-/// replay reader thread (see `src-tauri/src/replay.rs`).
-export type ReplayPositionPayload = {
-  sampleIdx: number;
-  positionMs: number;
-  totalMs: number;
-  playing: boolean;
-};
-
-export const subscribeReplayPosition = (
-  handler: (payload: ReplayPositionPayload) => void,
-): Promise<UnlistenFn> =>
-  listen<ReplayPositionPayload>(EVENT_REPLAY_POSITION, (evt) =>
-    handler(evt.payload),
-  );
-
-export const subscribeScanComplete = (
-  handler: () => void,
-): Promise<UnlistenFn> =>
-  listen<Record<string, never>>(EVENT_SCAN_COMPLETE, () => handler());
-
-export type ScanStepPayload = {
-  frequencyHz: number;
-};
-
-export const subscribeScanStep = (
-  handler: (payload: ScanStepPayload) => void,
-): Promise<UnlistenFn> =>
-  listen<ScanStepPayload>(EVENT_SCAN_STEP, (evt) => handler(evt.payload));
-
-export type ScanStoppedPayload = {
-  frequencyHz: number;
-};
-
-export const subscribeScanStopped = (
-  handler: (payload: ScanStoppedPayload) => void,
-): Promise<UnlistenFn> =>
-  listen<ScanStoppedPayload>(EVENT_SCAN_STOPPED, (evt) =>
-    handler(evt.payload),
-  );
-
-/// Signal classification result per `docs/SIGNALS.md §5.4`.
-/// Emitted at ~2 Hz by the DSP task.
-///
-/// - `confirmed`: wire-name of the spectrally confirmed mode, or null when
-///   SNR is too low. → green ModeSelector button.
-/// - `candidates`: wire-names from the frequency prior; always populated for
-///   known bands regardless of signal strength. → yellow buttons.
-export type SignalClassificationPayload = {
-  confirmed: string | null;
-  candidates: string[];
-  reason: string;
-};
-
-export const subscribeSignalClassification = (
-  handler: (payload: SignalClassificationPayload) => void,
-): Promise<UnlistenFn> =>
-  listen<SignalClassificationPayload>(EVENT_SIGNAL_CLASSIFICATION, (evt) =>
-    handler(evt.payload),
-  );
+  listen<IpcEventPayloads[K]>(name, (evt) => handler(evt.payload));

@@ -1,17 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { checkDevice, stopStream, type DeviceInfo } from "./ipc/commands";
+import { isRailError } from "./ipc/errors";
+import { subscribeIpcEvent } from "./ipc/events";
 import {
-  checkDevice,
-  ping,
-  stopStream,
-  type DeviceInfo,
-  type RailError,
-} from "./ipc/commands";
-import {
-  subscribeDeviceStatus,
-  subscribeReplayPosition,
-  subscribeSignalClassification,
-  subscribeSignalLevel,
-} from "./ipc/events";
+  EVENT_DEVICE_STATUS,
+  EVENT_REPLAY_POSITION,
+  EVENT_SIGNAL_CLASSIFICATION,
+  EVENT_SIGNAL_LEVEL,
+} from "./ipc/generated/events";
 import AudioControls from "./components/AudioControls";
 import FilterControl from "./components/FilterControl";
 import FrequencyControl from "./components/FrequencyControl";
@@ -29,21 +25,17 @@ import { useRadioStore } from "./store/radio";
 import { useReplayStore } from "./store/replay";
 import { useScannerStore } from "./store/scanner";
 import "./App.css";
+// Skin, loaded after App.css so its values win. See theme.css header.
+// App.css no longer duplicates any of it, so this order is load-bearing rather
+// than redundant: a component-level `import "./App.css"`, a Vite CSS-splitting
+// change, or a reorder here leaves the app unstyled with no error.
+import "./theme.css";
 
 type DeviceState =
   | { status: "idle" }
   | { status: "checking" }
   | { status: "found"; device: DeviceInfo }
   | { status: "missing"; message: string };
-
-const isRailError = (value: unknown): value is RailError => {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "kind" in value &&
-    typeof (value as { kind: unknown }).kind === "string"
-  );
-};
 
 /// Matches `AUDIO_RATE_HZ` in `src-tauri/src/dsp/demod/mod.rs`. The
 /// start_stream reply reports this rate verbatim; keeping a constant
@@ -64,7 +56,6 @@ const deviceLabel = (d: DeviceState): string => {
 };
 
 function App() {
-  const [pingResult, setPingResult] = useState<string>("…");
   const [device, setDevice] = useState<DeviceState>({ status: "idle" });
   const replayActive = useReplayStore((s) => s.active);
   const scannerVisible = useScannerStore((s) => s.visible);
@@ -111,20 +102,7 @@ function App() {
   useEffect(() => {
     let cancelled = false;
 
-    (async () => {
-      try {
-        const reply = await ping();
-        if (!cancelled) {
-          setPingResult(reply);
-          console.info("[RAIL] ping →", reply);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          console.error("[RAIL] ping failed:", err);
-          setPingResult("error");
-        }
-      }
-
+    void (async () => {
       if (!cancelled) {
         await refreshDevice();
       }
@@ -143,7 +121,7 @@ function App() {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
 
-    void subscribeDeviceStatus((payload) => {
+    void subscribeIpcEvent(EVENT_DEVICE_STATUS, (payload) => {
       if (payload.connected) return;
       console.warn("[RAIL] device disconnected mid-stream:", payload.error);
       stopStream().catch((err) => {
@@ -175,7 +153,7 @@ function App() {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
 
-    void subscribeSignalLevel((payload) => {
+    void subscribeIpcEvent(EVENT_SIGNAL_LEVEL, (payload) => {
       useRadioStore.getState().setSignalLevel({
         currentDbfs: payload.current,
         peakDbfs: payload.peak,
@@ -207,7 +185,7 @@ function App() {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
 
-    void subscribeSignalClassification((payload) => {
+    void subscribeIpcEvent(EVENT_SIGNAL_CLASSIFICATION, (payload) => {
       const store = useRadioStore.getState();
       if (!store.classifierEnabled) return;
       store.setClassification(payload);
@@ -233,7 +211,7 @@ function App() {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
 
-    void subscribeReplayPosition((payload) => {
+    void subscribeIpcEvent(EVENT_REPLAY_POSITION, (payload) => {
       useReplayStore
         .getState()
         .applyPosition(payload.positionMs, payload.playing);
@@ -260,21 +238,16 @@ function App() {
 
   return (
     <main className="app" onPointerDown={handlePointerDown}>
-      <MenuBar />
-      <header className="app-header">
+      <header className="topbar">
         <h1>RAIL</h1>
-        <div className="app-status">
-          <span>
-            IPC <code>{pingResult}</code>
-          </span>
-          <StatusPill
-            status={device.status}
-            label={deviceLabel(device)}
-            onRefresh={() => {
-              void refreshDevice();
-            }}
-          />
-        </div>
+        <MenuBar />
+        <StatusPill
+          status={device.status}
+          label={deviceLabel(device)}
+          onRefresh={() => {
+            void refreshDevice();
+          }}
+        />
       </header>
       <div className="controls-row">
         <section className="control-panel">
@@ -282,10 +255,10 @@ function App() {
           <div className="control-panel-row">
             <ModeSelector />
             <FilterControl />
-          </div>
-          <div className="control-panel-row">
-            <AudioControls />
-            <PpmControl />
+            <div className="control-panel-tools">
+              <AudioControls />
+              <PpmControl />
+            </div>
           </div>
         </section>
         {scannerVisible && <Scanner />}

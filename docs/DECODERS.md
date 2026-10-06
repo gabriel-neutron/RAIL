@@ -24,7 +24,7 @@ Each decoder:
 - Receives either raw IQ (ADS-B) or the NFM/WBFM discriminator audio output (APRS, RDS, POCSAG)
 - Returns `Option<DecodedFrame>` — never panics on corrupt input
 - Emits a typed Tauri JSON event (see `ARCHITECTURE.md §3.2` and §5.4)
-- Is gated by `center_hz_bits` — active only when the frequency prior matches (§2 below)
+- Is gated by the worker's current centre frequency, which arrives on the DSP control seam — active only when the frequency prior matches (§2 below)
 
 Module location: `src-tauri/src/decoders/` (one file per protocol).
 Do not put decoder logic inside `dsp/demod/` — the demod chain handles audio extraction;

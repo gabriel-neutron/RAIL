@@ -1,0 +1,25 @@
+# cargo-audit configuration. See https://github.com/rustsec/rustsec/tree/main/cargo-audit
+#
+# Ignored advisories must state why, and be re-checked when Tauri is upgraded.
+# An empty list is the goal; every entry here is debt.
+
+[advisories]
+ignore = [
+    # RUSTSEC-2026-0194 — quick-xml: quadratic run time on duplicate attribute names
+    # RUSTSEC-2026-0195 — quick-xml: unbounded namespace-declaration allocation
+    #
+    # Both are denial-of-service issues in XML parsing, fixed in quick-xml >=0.41.
+    # We cannot reach that version: the chain is
+    #   rail -> tauri 2.10.3 -> plist 1.8.0 -> quick-xml ^0.38
+    # and `cargo update -p quick-xml` resolves to 0.38.4, already the newest
+    # release allowed by plist's requirement. The upgrade is blocked upstream
+    # until plist bumps and Tauri picks it up.
+    #
+    # Not reachable from RAIL's threat model: plist parses macOS bundle metadata
+    # at build/codegen time, from files this repo generates. No RF, capture or
+    # user-supplied data reaches an XML parser at runtime.
+    #
+    # Re-check on every Tauri upgrade, and no later than 2026-12-01.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]

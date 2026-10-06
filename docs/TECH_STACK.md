@@ -24,7 +24,8 @@
 | Capture format | SigMF | 1.0 | Community standard |
 | Audio playback | Web Audio API | native | Browser API, no lib needed |
 | Canvas rendering | Canvas API | native | No waterfall libs |
-| Styling | plain CSS | native | Scoped via class names, no runtime |
+| Styling | plain CSS | native | `App.css` structure + `theme.css` skin, no runtime |
+| Fonts | IBM Plex Mono, VT323 | OFL 1.1 | Vendored in `public/fonts/`, latin subset — no CDN, works offline |
 | Build tool | Vite | 7.x | Fast, Tauri default |
 | Linting (Rust) | clippy | bundled | Zero warnings policy |
 | Linting (TS) | ESLint + strict TS | latest | No `any` policy |
@@ -150,6 +151,9 @@ cargo clippy --all-targets -- -D warnings
 
 # TypeScript check
 npx tsc --noEmit
+
+# Frontend tests
+npm test
 
 # Frontend build
 npm run build

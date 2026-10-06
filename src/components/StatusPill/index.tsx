@@ -19,7 +19,7 @@ const KIND_CLASS: Record<StatusKind, string> = {
 
 export const StatusPill = ({ status, label, onRefresh }: StatusPillProps) => {
   return (
-    <span className={`status-pill ${KIND_CLASS[status]}`}>
+    <span className={`status-pill ${KIND_CLASS[status]}`} title={label}>
       <span className="status-pill-dot" aria-hidden="true" />
       <span className="status-pill-label">{label}</span>
       {onRefresh && status === "missing" && (

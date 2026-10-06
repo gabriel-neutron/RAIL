@@ -21,10 +21,10 @@ import {
   startReplay,
   startStream,
   stopStream,
-  type RailError,
   type StartStreamReply,
 } from "../ipc/commands";
-import { useRadioStore } from "../store/radio";
+import { formatIpcError } from "../ipc/errors";
+import { parseDemodMode, useRadioStore } from "../store/radio";
 import { useReplayStore } from "../store/replay";
 
 export type WaterfallSession = StartStreamReply;
@@ -38,22 +38,6 @@ export type UseWaterfallOptions = {
 export type UseWaterfallState = {
   session: WaterfallSession | null;
   error: string | null;
-};
-
-const isRailError = (value: unknown): value is RailError => {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "kind" in value &&
-    typeof (value as { kind: unknown }).kind === "string"
-  );
-};
-
-const formatError = (err: unknown): string => {
-  if (isRailError(err)) {
-    return err.message ? `${err.kind}: ${err.message}` : err.kind;
-  }
-  return String(err);
 };
 
 export const useWaterfall = ({
@@ -120,7 +104,7 @@ export const useWaterfall = ({
 
     const radio = useRadioStore.getState();
 
-    (async () => {
+    void (async () => {
       await stopStream().catch(() => undefined);
       if (cancelled) return;
       try {
@@ -143,8 +127,13 @@ export const useWaterfall = ({
           // `setFrequency` is guarded against retune during replay, so
           // we write straight to the store instead.
           useRadioStore.setState({ frequencyHz: replyRaw.frequencyHz });
-          if (replyRaw.info.demodMode === "FM" || replyRaw.info.demodMode === "AM") {
-            radio.setMode(replyRaw.info.demodMode);
+          const recordedMode = parseDemodMode(replyRaw.info.demodMode);
+          if (recordedMode) {
+            radio.setMode(recordedMode);
+          } else {
+            console.warn(
+              `[RAIL] replay metadata carries an unknown demod mode "${replyRaw.info.demodMode}"; keeping the current selection`,
+            );
           }
           if (replyRaw.info.filterBandwidthHz > 0) {
             radio.setBandwidth(replyRaw.info.filterBandwidthHz);
@@ -164,11 +153,12 @@ export const useWaterfall = ({
         setSession(reply);
         setError(null);
         radio.setSampleRate(reply.sampleRateHz);
+        radio.setFftSize(reply.fftSize);
         radio.setStreaming(true);
         rafId = window.requestAnimationFrame(drain);
       } catch (err) {
         if (!cancelled) {
-          setError(formatError(err));
+          setError(formatIpcError(err));
           setSession(null);
           radio.setStreaming(false);
         }

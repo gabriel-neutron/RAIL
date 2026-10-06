@@ -95,6 +95,7 @@ struct Canceler {
 // SAFETY: `rtlsdr_cancel_async` is the only call we make through this
 // pointer and librtlsdr documents it as safe from any thread.
 unsafe impl Send for Canceler {}
+// SAFETY: as above — `rtlsdr_cancel_async` is callable from any thread.
 unsafe impl Sync for Canceler {}
 
 impl Canceler {
@@ -125,6 +126,7 @@ pub type OnDisconnect = Box<dyn FnOnce(String) + Send + 'static>;
 pub struct IqCanceler(Arc<Canceler>);
 
 impl IqCanceler {
+    /// Ask the reader thread to stop. Idempotent and safe from any thread.
     pub fn cancel(&self) {
         self.0.cancel();
     }

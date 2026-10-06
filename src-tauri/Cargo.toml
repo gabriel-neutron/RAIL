@@ -14,7 +14,6 @@ default = []
 profile = []
 
 [build-dependencies]
-serde_json = "1"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
@@ -30,3 +29,30 @@ nusb = "0.1"
 bytemuck = "1"
 num-complex = "0.4"
 tauri-plugin-dialog = "2"
+
+# Lints enforced by CI (`cargo clippy -- -D warnings`). These mechanise the
+# rules stated in CLAUDE.md so they fail the build instead of relying on review.
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+unused_qualifications = "warn"
+# CLAUDE.md requires doc comments on all public items.
+missing_docs = "warn"
+
+[lints.clippy]
+# CLAUDE.md: "No unwrap() in Rust except in tests". Test modules opt out with
+# an inner #![allow(...)].
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+# FFI safety: every unsafe block must state why it is sound.
+undocumented_unsafe_blocks = "deny"
+# Precision/truncation in DSP code: ~100 sites, nearly all deliberate index
+# and sample-rate arithmetic. Left off rather than sprinkling #[allow] over
+# every cast; revisit if a real precision bug ever ships.
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+# General hygiene.
+todo = "warn"
+dbg_macro = "deny"
+print_stdout = "warn"

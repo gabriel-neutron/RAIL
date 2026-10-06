@@ -1,6 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useState } from "react";
 
-import { setGain } from "../../ipc/commands";
 import { useRadioStore } from "../../store/radio";
 import { useReplayStore } from "../../store/replay";
 import HoverSlider from "./HoverSlider";
@@ -122,7 +121,6 @@ const GainIcon = ({ auto }: { auto: boolean }) => (
 const formatGainTenths = (t: number) => `${(t / 10).toFixed(1)} dB`;
 
 export const AudioControls = () => {
-  const streaming = useRadioStore((s) => s.streaming);
   const volume = useRadioStore((s) => s.volume);
   const muted = useRadioStore((s) => s.muted);
   const squelchDbfs = useRadioStore((s) => s.squelchDbfs);
@@ -135,24 +133,17 @@ export const AudioControls = () => {
   const setMuted = useRadioStore((s) => s.setMuted);
   const setSquelchDbfs = useRadioStore((s) => s.setSquelchDbfs);
   const setAutoGain = useRadioStore((s) => s.setAutoGain);
-  const setGainTenthsStore = useRadioStore((s) => s.setGainTenthsDb);
+  const selectGainIndex = useRadioStore((s) => s.selectGainIndex);
 
   // Remember the last "on" squelch threshold so toggling off → on
   // restores the user's previous pick instead of snapping to the
   // default.
-  const lastSquelchRef = useRef<number>(squelchDbfs ?? SQUELCH_DEFAULT_DBFS);
-  useEffect(() => {
-    if (squelchDbfs !== null) lastSquelchRef.current = squelchDbfs;
-  }, [squelchDbfs]);
-
-  // Snap gain to a sensible default when the hardware-supplied list
-  // doesn't contain our current pick (first connection, device swap).
-  useEffect(() => {
-    if (gains.length === 0) return;
-    if (!gains.includes(gainTenths)) {
-      setGainTenthsStore(gains[Math.floor(gains.length / 2)]);
-    }
-  }, [gains, gainTenths, setGainTenthsStore]);
+  const [lastSquelch, setLastSquelch] = useState<number>(
+    squelchDbfs ?? SQUELCH_DEFAULT_DBFS,
+  );
+  if (squelchDbfs !== null && squelchDbfs !== lastSquelch) {
+    setLastSquelch(squelchDbfs);
+  }
 
   // --- Volume ---------------------------------------------------------
   const volumePct = Math.round(volume * 100);
@@ -180,10 +171,10 @@ export const AudioControls = () => {
 
   // --- Squelch --------------------------------------------------------
   const squelchEnabled = squelchDbfs !== null;
-  const squelchValue = squelchDbfs ?? lastSquelchRef.current;
+  const squelchValue = squelchDbfs ?? lastSquelch;
 
   const toggleSquelch = () => {
-    setSquelchDbfs(squelchEnabled ? null : lastSquelchRef.current);
+    setSquelchDbfs(squelchEnabled ? null : lastSquelch);
   };
 
   // --- Gain -----------------------------------------------------------
@@ -194,29 +185,12 @@ export const AudioControls = () => {
       ? formatGainTenths(gains[gainIdx])
       : "—";
 
-  const pushGainToHardware = (next: Parameters<typeof setGain>[0]) => {
-    if (!streaming || replayActive) return;
-    setGain(next).catch((err) => {
-      console.warn("[RAIL] set_gain failed:", err);
-    });
-  };
-
   const toggleAutoGain = () => {
-    if (replayActive) return;
-    const next = !autoGain;
-    setAutoGain(next);
-    pushGainToHardware(
-      next ? { auto: true } : { auto: false, tenthsDb: gainTenths },
-    );
+    setAutoGain(!autoGain);
   };
 
   const handleGainChange = (idx: number) => {
-    if (replayActive || gains.length === 0) return;
-    const clamped = Math.max(0, Math.min(gains.length - 1, idx));
-    const tenths = gains[clamped];
-    setGainTenthsStore(tenths);
-    if (autoGain) return;
-    pushGainToHardware({ auto: false, tenthsDb: tenths });
+    selectGainIndex(idx);
   };
 
   return (

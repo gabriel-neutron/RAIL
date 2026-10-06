@@ -48,13 +48,31 @@ pub fn set_center_freq(dev: &Device, freq_hz: u32) -> Result<(), RailError> {
 ### Component rules
 - Functional components only
 - Props interface defined inline above the component
-- No inline styles — use CSS modules or Tailwind classes
+- No inline styles (Tailwind is not used — see `TECH_STACK.md`)
 - Self-explanatory naming: no comments needed for UI logic
 
 ### State management
 - All radio state in `store/radio.ts` (zustand)
 - All session/capture state in `store/session.ts`
 - No local state for data that affects multiple components
+
+### Styling
+- Two stylesheets, imported in this order by `App.tsx`:
+  `App.css` is layout and structure, `src/theme.css` is the visual identity
+  (colour, type, spacing). The skin loads second so it wins. Now that `App.css`
+  duplicates none of it, that order is load-bearing, not belt-and-braces —
+  see the comment at the import site.
+- `App.css` declares no colour, no `font-family` and no `font-size`. Not "few",
+  none. `src/theme.css` is the only source of the palette and the type scale.
+- Keyword resets are structure, not colour, and are permitted in `App.css`:
+  `background: transparent`, `background: none`, `border: none`,
+  `outline: none`, `currentColor`, `inherit`. They suppress user-agent chrome
+  without picking a value. Deleting them resurfaces native button borders.
+- Enforced by `src/test/appCssPalette.test.ts`, which reads `App.css` and fails
+  on any hex, `rgb()`/`hsl()`, named colour, `font-family` or `font-size`.
+- The palette rationale, its measured contrast ratios and the rules that keep
+  them (fills vs marks vs edges, the 24px target floor, the tracking ceiling)
+  live in the `theme.css` header comment — not duplicated here.
 
 ### IPC rules
 - All `invoke()` and `listen()` calls in `/src/ipc/` only

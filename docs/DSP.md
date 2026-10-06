@@ -9,6 +9,7 @@
 6. [USB/LSB/CW demodulation](#6-usblsbcw-demodulation)
 7. [Filter design](#7-filter-design)
 8. [Edge cases and known pitfalls](#8-edge-cases-and-known-pitfalls)
+9. [Display coordinate systems (bin ↔ Hz ↔ pixel)](#9-display-coordinate-systems-bin--hz--pixel)
 
 ---
 
@@ -69,9 +70,29 @@ RTL-SDR USB → IQ buffer (Rust) → FFT → magnitude bins (float32[N])
 **Frontend responsibility**: colormap only (float32 dB value → RGB color).
 Rust must never send RGB. React must never compute FFT or magnitude.
 
-**Recommended colormap**: linear interpolation across:
-`[dark blue → blue → cyan → green → yellow → red]`
-mapped to the dB range `[noise_floor, signal_peak]`.
+**Colormap**: linear interpolation across a seven-stop single-hue amber ramp,
+mapped to the dB range `[noise_floor, signal_peak]`:
+
+| # | RGB | Role |
+|---|---|---|
+| 0 | `4, 3, 1` | cold tube — below the noise floor |
+| 1 | `46, 25, 4` | |
+| 2 | `104, 59, 9` | |
+| 3 | `168, 105, 18` | |
+| 4 | `224, 152, 31` | |
+| 5 | `255, 196, 84` | |
+| 6 | `255, 246, 226` | bloom — peaks |
+
+One hue, not a rainbow: the waterfall encodes a single ordered quantity
+(power), so a hue change would imply a category boundary that does not exist.
+The ramp is strictly monotonic in CIE L\* (0.8 → 97.1), which is the property
+that makes "brighter" mean "more signal" everywhere on the scale; a
+non-monotonic ramp reads as less signal wherever luminance dips. Implemented in
+`src/components/Waterfall/colormap.ts` and enforced by its test.
+
+Superseded the earlier `[dark blue → blue → cyan → green → yellow → red]`
+recommendation, which was not monotonic in luminance (cyan is brighter than
+green) and carried five hue changes.
 
 **Frame rate**: target 25–30 fps. At fs=2.048 MHz and N=8192:
 `T = 8192/2048000 ≈ 4ms per FFT`. Every frame between emits is FFT-processed and
@@ -293,3 +314,109 @@ Library option: `biquad` crate for IIR filters (simpler, lower CPU).
 | SSB audio DAC overflow | Hilbert combine peaks at ±1.5 | tanh soft-clip before resampler |
 | FFT size mismatch | N not matching buffer | Assert N == buffer size before FFT |
 | Normalization drift | No reference level | Fix noise floor reference at startup |
+| Ghost signal: a peak recedes as you tune toward it | Waterfall history keeps its painted columns while the axis is relabelled for the new centre; displaced by `new centre − old centre` | `retuneShiftPx` slides the history on every non-drag retune (§9.6). Drag already shifts it |
+| Ghost signal, same symptom, history cleared | Not a fault in the chain: a synthetic carrier swept through live LO → mixer → FFT → crop lands within one bin at every centre (`ghost_sweep.rs`, `apparentFrequency.test.ts`). IQ-image mirror (slope −1) and fs/4 sign error (offset ≈ fs/2) are ruled out. Left to measure on hardware: a spur fixed relative to the LO, and queued old-centre IQ — at most `IQ_CHANNEL_CAPACITY` chunks + USB buffers, about 96 ms at 2.048 Msps | Compare with a second dongle or SDR#/GQRX at the same centres (issue #24) |
+
+---
+
+## 9. Display coordinate systems (bin ↔ Hz ↔ pixel)
+
+Implemented in `src/viewport/spectrumViewport.ts`, `src/viewport/cellAxis.ts` and
+`src/viewport/canvasSizing.ts`. Every overlay stacked on the spectrum reads
+this section's transform from there rather than rebuilding it.
+
+### 9.1 The three spaces
+
+| Space | Unit | Owner |
+|---|---|---|
+| Bin | FFT bin index, 0 … N−1 after the shift of §2 step 6 | Rust (`N`), cropped for zoom in `Waterfall`'s `cropCenter` |
+| Frequency | real Hz | the tuned centre + the visible span |
+| Pixel | canvas x | one of three pixel spaces — see §9.4 |
+
+### 9.2 Hz ↔ pixel
+
+The visible span is the true one of §9.5, `span = fs · kept / N`. After the
+fs/4 mixer of §1–3 the tuned signal sits at the centre of bin `N/2`; `minHz`
+is the left edge of the first kept bin:
+
+```
+minHz = f + (start − N/2 − ½) · fs / N     (start, kept: §9.5)
+maxHz = minHz + span
+x     = (hz − minHz) / span · width
+hz    = minHz + x / width · span
+```
+
+`x ↔ hz` is an exact round trip. Two relative forms drop the centre term:
+`hzWidthToPx(w) = w/span · width` and `pxWidthToHz(p) = p/width · span`. Pan
+gestures must use the relative form — an absolute `xToHz` inside a handler
+that retunes on every move changes `minHz`, which changes the next move's
+mapping, which is a runaway pan.
+
+### 9.3 Bin ↔ pixel
+
+Bin space never passes through Hz. The two directions are deliberately
+asymmetric, because the two consumers need different things:
+
+- `binLeftX(i)  = i / binCount · width` — a **point** map. The spectrum
+  polyline needs one vertex per bin, placed at the bin's left edge.
+- `xToBinIndex(x) = floor(x · binCount / width)` — a **cell** map. The
+  waterfall row needs the bin *covering* a pixel column.
+
+They compose to identity in the direction `xToBinIndex(binLeftX(i)) === i`,
+and only that direction; the reverse lands within one bin width. `binCount`
+is always an input, so `cropCenter` stays the sole owner of what is on screen.
+
+Both directions come from one implementation, `src/viewport/cellAxis.ts`,
+which knows only index / count / width. The scanner's band-activity strip
+draws and hit-tests against the same map with its axis in scan-step index
+over an arbitrary frequency list; it takes the clamped inverse, because its
+x comes from a pointer and can land outside the strip.
+
+### 9.4 The DPR rule
+
+One rule: a canvas's backing store is its CSS size × an explicit
+`pixelRatio`, rounded to whole device pixels, and its 2d context is
+pre-transformed by that ratio so all drawing happens in CSS pixels.
+
+The frequency axis, band guide and filter marker pass
+`window.devicePixelRatio`. The two streaming canvases — the waterfall row and
+the spectrum curve — pass **1**, the one documented exception: both the
+per-pixel LUT loop and the `ImageData` row scale with backing-store width, and
+`PERF.md §1` sets a ~1 ms/frame NO-GO threshold measured without DPR.
+
+That exception is also why the waterfall's drag hit-test can treat
+`canvas.width / rect.width` as 1. Three pixel spaces coexist and must not be
+conflated: CSS pixels (overlays, under `setTransform(dpr, …)`), backing-store
+pixels (the streaming pair), and `getBoundingClientRect().width` (hit-testing).
+
+### 9.5 True span and the crop window
+
+The overlays label the span the waterfall actually shows, not `fs / z`:
+
+```
+kept  = min(N, max(16, floor(N / z)))
+span  = fs · kept / N
+start = floor((N + 1 − kept) / 2)
+minHz = f + (start − N/2 − ½) · fs / N
+```
+
+The tuned frequency is the *centre* of bin `N/2` after the FFT shift, so the
+crop is placed around edge index `N/2 + ½`. `start` is the nearest whole bin;
+when `N − kept` is even the residual is half a bin (125 Hz at N = 8192,
+fs = 2.048 MHz), and `minHz` absorbs it so every overlay lands exactly on the
+bins drawn. At z = 1 the span is `fs` and `minHz` sits half a bin below
+`f − fs/2`. Nominal `fs / z` was off by up to ~0.5 % at z = 50 and put the crop
+half a bin off centre (issue #17).
+
+`cropWindow` in `src/viewport/spectrumViewport.ts` is the one owner of
+`start`/`kept`; the waterfall crop and the viewport both call it.
+
+### 9.6 Retune and the painted history
+
+Waterfall rows are pixels: a row keeps the column it was painted at. When the
+centre moves from `f₀` to `f₁` the history must slide by
+`retuneShiftPx = round(hzWidthToPx(f₀ − f₁))` or every old streak is
+relabelled `f₁ − f₀` away from its true frequency. A drag shifts the canvas
+itself as it goes; every other retune (click, keyboard, typed, scanner) goes
+through the `frequencyHz` effect in `Waterfall`. Content shifted past an edge
+is lost; the exposed strip is background.

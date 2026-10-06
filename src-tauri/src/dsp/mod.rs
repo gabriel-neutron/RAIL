@@ -8,3 +8,6 @@ pub mod fft;
 pub mod filter;
 pub mod input;
 pub mod waterfall;
+
+#[cfg(test)]
+mod ghost_sweep;

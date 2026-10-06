@@ -40,18 +40,31 @@ pub type Label = &'static str;
 /// (OOK, AIS, ADS-B, …) are not in this set.
 pub type WireName = &'static str;
 
+/// Wideband FM broadcast audio, 87.5-108 MHz. See: docs/SIGNALS.md §3.
 pub const LABEL_WBFM: Label = "WBFM";
+/// Narrowband FM voice (PMR, marine, amateur 2 m). See: docs/SIGNALS.md §3.
 pub const LABEL_NBFM: Label = "NBFM";
+/// Amplitude modulation, chiefly aviation voice. See: docs/SIGNALS.md §3.
 pub const LABEL_AM: Label = "AM";
+/// Upper-sideband SSB voice. See: docs/SIGNALS.md §3.
 pub const LABEL_USB: Label = "USB";
+/// Lower-sideband SSB voice. See: docs/SIGNALS.md §3.
 pub const LABEL_LSB: Label = "LSB";
+/// Continuous-wave Morse keying. See: docs/SIGNALS.md §3.
 pub const LABEL_CW: Label = "CW";
+/// On-off keying, typical of ISM remotes and sensors. See: docs/SIGNALS.md §3.
 pub const LABEL_OOK: Label = "OOK";
+/// Maritime AIS position bursts near 162 MHz. See: docs/SIGNALS.md §4.6.
 pub const LABEL_AIS: Label = "AIS";
+/// APRS packet radio on the 2 m amateur band. See: docs/SIGNALS.md §4.5.
 pub const LABEL_APRS: Label = "APRS";
+/// NOAA weather-satellite APT imagery, 137-138 MHz. See: docs/SIGNALS.md §4.4.
 pub const LABEL_NOAA_APT: Label = "NOAA-APT";
+/// Aircraft ADS-B squitter at 1090 MHz. See: docs/SIGNALS.md §4.14.
 pub const LABEL_ADS_B: Label = "ADS-B";
+/// Unidentified digital signal narrower than a voice channel. See: docs/SIGNALS.md §3.
 pub const LABEL_DIGITAL_NARROWBAND: Label = "digital_narrowband";
+/// Unidentified digital signal wider than a voice channel. See: docs/SIGNALS.md §3.
 pub const LABEL_DIGITAL_WIDEBAND: Label = "digital_wideband";
 
 /// Classifier output.
@@ -63,8 +76,11 @@ pub const LABEL_DIGITAL_WIDEBAND: Label = "digital_wideband";
 /// - `reason` — human-readable reason for `confirmed`, shown as tooltip.
 #[derive(Debug, Clone)]
 pub struct ClassificationResult {
+    /// Spectrally confirmed mode wire-name, `None` below the SNR gate.
     pub confirmed: Option<WireName>,
+    /// Mode wire-names suggested by the frequency prior.
     pub candidates: Vec<WireName>,
+    /// Human-readable justification for `confirmed`, shown as a tooltip.
     pub reason: String,
 }
 
@@ -140,7 +156,7 @@ pub fn classify(
         .enumerate()
         .filter(|(i, _)| ((*i as isize) - dc_center as isize).unsigned_abs() > dc_guard)
         .filter(|(_, &db)| db > noise_floor + MIN_PEAK_SNR_DB)
-        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap());
+        .max_by(|a, b| a.1.total_cmp(b.1));
 
     let Some((peak_bin, &peak_db)) = peak else {
         return ClassificationResult::no_signal(candidates);
@@ -183,7 +199,11 @@ pub fn classify(
             // Single-prior band: trust the prior directly, no spectral analysis.
             1 => Some(candidates[0]),
             // Multi-candidate band: spectral picks within the prior's set.
-            _ => pick_from_candidates(&candidates, bw_family, is_am_family, asym_db_opt.unwrap()),
+            // `asym_db_opt` is `Some` exactly when `candidates.len() >= 2`,
+            // which is this arm's condition.
+            _ => asym_db_opt.and_then(|asym_db| {
+                pick_from_candidates(&candidates, bw_family, is_am_family, asym_db)
+            }),
         }
     } else {
         None
@@ -464,6 +484,7 @@ fn hz_in(freq: u64, lo_hz: u64, hi_hz: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
     use std::f32::consts::PI;
 

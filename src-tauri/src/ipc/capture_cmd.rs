@@ -11,13 +11,14 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::{AppHandle, Runtime, State};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 
 use crate::capture::sigmf::SigMfStartParams;
 use crate::capture::tmp::{move_file, new_tmp_path};
 use crate::dsp::demod::AUDIO_RATE_HZ;
 use crate::error::RailError;
-use crate::ipc::commands::{session_poisoned, AppState};
+use crate::ipc::control::{DspControl, DspControlHandle};
+use crate::ipc::session::{session_poisoned, AppState};
 
 /// Requests from Tauri commands to the DSP worker that interact with
 /// capture writers. Replies ride on a `oneshot` so commands remain
@@ -65,11 +66,16 @@ pub(crate) struct IqStopInfo {
     pub sample_rate_hz: u32,
 }
 
+/// The radio parameters a capture records. Read from the control seam's
+/// state-of-record, never queried from the worker — a paused replay or a
+/// disconnected dongle stops the worker draining, and a capture command
+/// must not wedge on that.
 struct RadioSnapshot {
     frequency_hz: u64,
     mode: String,
     bandwidth_hz: u32,
     gain_tenths_db: Option<i32>,
+    squelch_dbfs: Option<f32>,
     sample_rate_hz: u32,
 }
 
@@ -78,23 +84,23 @@ fn radio_snapshot(state: &State<'_, AppState>) -> Result<RadioSnapshot, RailErro
     let s = guard
         .as_ref()
         .ok_or_else(|| RailError::InvalidParameter("stream not running".into()))?;
+    let params = s.control.snapshot()?;
     Ok(RadioSnapshot {
-        frequency_hz: s.frequency_hz as u64,
-        mode: s.mode.clone(),
-        bandwidth_hz: s.bandwidth_hz,
-        gain_tenths_db: s.gain_tenths_db,
+        frequency_hz: u64::from(params.center_hz),
+        mode: params.mode_str().to_string(),
+        bandwidth_hz: params.bandwidth_hz,
+        gain_tenths_db: params.gain_tenths_db,
+        squelch_dbfs: params.squelch_dbfs,
         sample_rate_hz: s.sample_rate_hz,
     })
 }
 
-fn capture_sender(
-    state: &State<'_, AppState>,
-) -> Result<mpsc::UnboundedSender<CaptureControl>, RailError> {
+fn capture_sender(state: &State<'_, AppState>) -> Result<DspControlHandle, RailError> {
     let guard = state.session.lock().map_err(session_poisoned)?;
     let s = guard
         .as_ref()
         .ok_or_else(|| RailError::InvalidParameter("stream not running".into()))?;
-    Ok(s.capture_tx.clone())
+    Ok(s.control.clone())
 }
 
 /// ISO 8601 UTC "YYYYMMDDTHHMMSSZ" — no separators so it's safe in
@@ -160,12 +166,11 @@ pub async fn start_audio_capture<R: Runtime>(
     let temp = new_tmp_path(&app, "wav")?;
     let tx = capture_sender(&state)?;
     let (reply_tx, reply_rx) = oneshot::channel();
-    tx.send(CaptureControl::StartAudio {
+    tx.send(DspControl::Capture(CaptureControl::StartAudio {
         path: temp.clone(),
         sample_rate_hz: AUDIO_RATE_HZ as u32,
         reply: reply_tx,
-    })
-    .map_err(|e| RailError::StreamError(format!("capture channel closed: {e}")))?;
+    }))?;
     reply_rx
         .await
         .map_err(|e| RailError::StreamError(format!("capture reply dropped: {e}")))??;
@@ -195,8 +200,9 @@ pub async fn stop_audio_capture(
     let radio = radio_snapshot(&state)?;
     let tx = capture_sender(&state)?;
     let (reply_tx, reply_rx) = oneshot::channel();
-    tx.send(CaptureControl::StopAudio { reply: reply_tx })
-        .map_err(|e| RailError::StreamError(format!("capture channel closed: {e}")))?;
+    tx.send(DspControl::Capture(CaptureControl::StopAudio {
+        reply: reply_tx,
+    }))?;
     let info = reply_rx
         .await
         .map_err(|e| RailError::StreamError(format!("capture reply dropped: {e}")))??;
@@ -223,6 +229,16 @@ pub struct StartIqCaptureReply {
     pub suggested_name: String,
 }
 
+/// Arguments for [`start_iq_capture`].
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartIqCaptureArgs {
+    /// Classifier hint recorded in the SigMF metadata. Absent when no
+    /// signal was confirmed at the moment the recording started.
+    #[serde(default)]
+    pub signal_type_guess: Option<String>,
+}
+
 /// Open a temp SigMF writer and start mirroring every shifted cf32
 /// sample into it. The `.sigmf-data` path is what users care about
 /// when picking a save location; the `.sigmf-meta` sibling is kept
@@ -231,7 +247,7 @@ pub struct StartIqCaptureReply {
 pub async fn start_iq_capture<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, AppState>,
-    signal_type_guess: Option<String>,
+    args: StartIqCaptureArgs,
 ) -> Result<StartIqCaptureReply, RailError> {
     let radio = radio_snapshot(&state)?;
     let data_temp = new_tmp_path(&app, "sigmf-data")?;
@@ -247,16 +263,16 @@ pub async fn start_iq_capture<R: Runtime>(
             .unwrap_or(f32::NAN),
         demod_mode: radio.mode.clone(),
         filter_bandwidth_hz: radio.bandwidth_hz,
+        squelch_dbfs: radio.squelch_dbfs,
         datetime_iso8601: iso8601_compact(now_secs()?),
-        signal_type_guess,
+        signal_type_guess: args.signal_type_guess,
     };
-    tx.send(CaptureControl::StartIq {
+    tx.send(DspControl::Capture(CaptureControl::StartIq {
         meta_path: meta_temp.clone(),
         data_path: data_temp.clone(),
         params,
         reply: reply_tx,
-    })
-    .map_err(|e| RailError::StreamError(format!("capture channel closed: {e}")))?;
+    }))?;
     reply_rx
         .await
         .map_err(|e| RailError::StreamError(format!("capture reply dropped: {e}")))??;
@@ -285,8 +301,9 @@ pub async fn stop_iq_capture(state: State<'_, AppState>) -> Result<StopIqCapture
     let radio = radio_snapshot(&state)?;
     let tx = capture_sender(&state)?;
     let (reply_tx, reply_rx) = oneshot::channel();
-    tx.send(CaptureControl::StopIq { reply: reply_tx })
-        .map_err(|e| RailError::StreamError(format!("capture channel closed: {e}")))?;
+    tx.send(DspControl::Capture(CaptureControl::StopIq {
+        reply: reply_tx,
+    }))?;
     let info = reply_rx
         .await
         .map_err(|e| RailError::StreamError(format!("capture reply dropped: {e}")))??;
@@ -399,6 +416,7 @@ pub fn save_screenshot(args: SaveScreenshotArgs) -> Result<(), RailError> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
 
     #[test]
@@ -410,6 +428,19 @@ mod tests {
     fn iso8601_matches_2024_01_02_12_34_56() {
         // 2024-01-02T12:34:56Z = 1704198896
         assert_eq!(iso8601_compact(1_704_198_896), "20240102T123456Z");
+    }
+
+    #[test]
+    fn start_iq_capture_args_deserialize_from_the_camel_case_envelope() {
+        let args: StartIqCaptureArgs =
+            serde_json::from_str(r#"{"signalTypeGuess": "ADS-B"}"#).unwrap();
+        assert_eq!(args.signal_type_guess.as_deref(), Some("ADS-B"));
+    }
+
+    #[test]
+    fn start_iq_capture_args_default_to_no_guess() {
+        let args: StartIqCaptureArgs = serde_json::from_str("{}").unwrap();
+        assert!(args.signal_type_guess.is_none());
     }
 
     #[test]

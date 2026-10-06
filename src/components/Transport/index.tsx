@@ -37,12 +37,17 @@ export const Transport = () => {
   // drag = one seek.
   const [draftMs, setDraftMs] = useState<number | null>(null);
   const draftRef = useRef<number | null>(null);
-  draftRef.current = draftMs;
+
+  const scrub = (next: number) => {
+    draftRef.current = next;
+    setDraftMs(next);
+  };
 
   useEffect(() => {
     const commit = () => {
       const d = draftRef.current;
       if (d === null) return;
+      draftRef.current = null;
       setDraftMs(null);
       void seek(d);
     };
@@ -78,7 +83,7 @@ export const Transport = () => {
         max={info.durationMs}
         step={10}
         value={displayMs}
-        onChange={(e) => setDraftMs(Number(e.target.value))}
+        onChange={(e) => scrub(Number(e.target.value))}
         aria-label="Seek"
       />
       <span className="transport-time">{formatTime(info.durationMs)}</span>

@@ -20,7 +20,7 @@
 //! "dongle is physically attached" probe used by the UI on startup. Actual
 //! tuning/streaming requires [`RtlSdrDevice::open`] and therefore librtlsdr.
 
-use std::ffi::{c_int, c_void, CStr};
+use std::ffi::c_void;
 use std::ptr;
 
 use serde::Serialize;
@@ -29,11 +29,19 @@ use crate::error::RailError;
 
 pub mod ffi;
 pub mod stream;
+pub mod tuner;
+
+#[cfg(test)]
+pub(crate) mod fake_tuner;
+
+pub use tuner::{RtlSdrTuner, Tuner};
 
 /// Serializable RTL-SDR device description sent to the frontend.
 #[derive(Debug, Clone, Serialize)]
 pub struct DeviceInfo {
+    /// Zero-based device index, as used by `rtlsdr_open`.
     pub index: u32,
+    /// Device display name reported by librtlsdr.
     pub name: String,
 }
 
@@ -91,15 +99,6 @@ pub fn check_device() -> Result<DeviceInfo, RailError> {
     Err(RailError::DeviceNotFound)
 }
 
-/// Return the number of RTL-SDR devices visible to librtlsdr (post-driver).
-/// Differs from [`check_device`]: this one requires the WinUSB/udev driver
-/// to be installed and will return 0 otherwise.
-pub fn librtlsdr_device_count() -> u32 {
-    // SAFETY: `rtlsdr_get_device_count` takes no arguments and is
-    // thread-safe per the librtlsdr source.
-    unsafe { ffi::rtlsdr_get_device_count() }
-}
-
 /// Safe RAII handle around a `librtlsdr` device.
 ///
 /// The raw pointer is moved to a single worker thread for streaming (see
@@ -130,19 +129,6 @@ impl RtlSdrDevice {
         Ok(Self { ptr })
     }
 
-    /// Human-readable device name for the given index.
-    pub fn device_name(index: u32) -> Option<String> {
-        // SAFETY: librtlsdr returns either NULL or a pointer to a static
-        // string living for the duration of the process.
-        let raw = unsafe { ffi::rtlsdr_get_device_name(index) };
-        if raw.is_null() {
-            return None;
-        }
-        // SAFETY: pointer is non-null and points to a NUL-terminated static.
-        let cstr = unsafe { CStr::from_ptr(raw) };
-        cstr.to_str().ok().map(str::to_owned)
-    }
-
     /// Configure sample rate in Hz. See `docs/HARDWARE.md` §4 for stable
     /// rates (we default to 2 048 000 in stream setup).
     pub fn set_sample_rate(&self, hz: u32) -> Result<(), RailError> {
@@ -151,51 +137,6 @@ impl RtlSdrDevice {
         if rc != 0 {
             return Err(RailError::StreamError(format!(
                 "rtlsdr_set_sample_rate({hz}) -> {rc}"
-            )));
-        }
-        Ok(())
-    }
-
-    /// Set tuner center frequency in Hz.
-    pub fn set_center_freq(&self, hz: u32) -> Result<(), RailError> {
-        // SAFETY: handle owned by self.
-        let rc = unsafe { ffi::rtlsdr_set_center_freq(self.ptr, hz) };
-        if rc != 0 {
-            return Err(RailError::StreamError(format!(
-                "rtlsdr_set_center_freq({hz}) -> {rc}"
-            )));
-        }
-        Ok(())
-    }
-
-    /// Read back the actual tuned frequency (may differ from the request —
-    /// see `docs/HARDWARE.md` §4).
-    pub fn center_freq(&self) -> u32 {
-        // SAFETY: handle owned by self.
-        unsafe { ffi::rtlsdr_get_center_freq(self.ptr) }
-    }
-
-    /// `true` = manual gain mode, `false` = hardware AGC.
-    pub fn set_tuner_gain_mode(&self, manual: bool) -> Result<(), RailError> {
-        let flag: c_int = if manual { 1 } else { 0 };
-        // SAFETY: handle owned by self.
-        let rc = unsafe { ffi::rtlsdr_set_tuner_gain_mode(self.ptr, flag) };
-        if rc != 0 {
-            return Err(RailError::StreamError(format!(
-                "rtlsdr_set_tuner_gain_mode({manual}) -> {rc}"
-            )));
-        }
-        Ok(())
-    }
-
-    /// Gain in tenths of a dB (librtlsdr's native unit). Only meaningful
-    /// when manual gain mode is on.
-    pub fn set_tuner_gain_tenths(&self, tenths_db: i32) -> Result<(), RailError> {
-        // SAFETY: handle owned by self.
-        let rc = unsafe { ffi::rtlsdr_set_tuner_gain(self.ptr, tenths_db) };
-        if rc != 0 {
-            return Err(RailError::StreamError(format!(
-                "rtlsdr_set_tuner_gain({tenths_db}) -> {rc}"
             )));
         }
         Ok(())
@@ -229,19 +170,6 @@ impl RtlSdrDevice {
         Ok(buf)
     }
 
-    /// PPM crystal correction (see `docs/HARDWARE.md` §3).
-    pub fn set_freq_correction_ppm(&self, ppm: i32) -> Result<(), RailError> {
-        // librtlsdr returns -2 when the correction is unchanged; treat as OK.
-        // SAFETY: handle owned by self.
-        let rc = unsafe { ffi::rtlsdr_set_freq_correction(self.ptr, ppm) };
-        if rc != 0 && rc != -2 {
-            return Err(RailError::StreamError(format!(
-                "rtlsdr_set_freq_correction({ppm}) -> {rc}"
-            )));
-        }
-        Ok(())
-    }
-
     /// Must be called once before `read_async`. See `docs/HARDWARE.md` §6
     /// (skipping `reset_buffer` is the #1 cause of "callback not called").
     pub fn reset_buffer(&self) -> Result<(), RailError> {
@@ -256,7 +184,8 @@ impl RtlSdrDevice {
     }
 
     /// Start the blocking async read loop. `cb` will be invoked on
-    /// librtlsdr's internal thread until [`Self::cancel_async`] is called.
+    /// librtlsdr's internal thread until [`stream::IqCanceler::cancel`] is
+    /// called.
     ///
     /// # Safety
     ///
@@ -270,120 +199,29 @@ impl RtlSdrDevice {
         buf_num: u32,
         buf_len: u32,
     ) -> Result<(), RailError> {
-        let rc = ffi::rtlsdr_read_async(self.ptr, cb, ctx, buf_num, buf_len);
+        // SAFETY: the caller of this `unsafe fn` upholds the contract documented
+        // above — `self.ptr` is live and `ctx` outlives the async loop.
+        let rc = unsafe { ffi::rtlsdr_read_async(self.ptr, cb, ctx, buf_num, buf_len) };
         if rc != 0 {
             return Err(RailError::StreamError(format!("rtlsdr_read_async -> {rc}")));
         }
         Ok(())
     }
 
-    /// Signal the async loop to exit. Safe to call from any thread.
-    pub fn cancel_async(&self) -> Result<(), RailError> {
-        // SAFETY: librtlsdr documents `rtlsdr_cancel_async` as safe to call
-        // from a different thread than the one running `read_async`.
-        let rc = unsafe { ffi::rtlsdr_cancel_async(self.ptr) };
-        if rc != 0 {
-            return Err(RailError::StreamError(format!(
-                "rtlsdr_cancel_async -> {rc}"
-            )));
-        }
-        Ok(())
-    }
-
     /// Expose the raw pointer for `rtlsdr_cancel_async` to be called from a
     /// thread that only holds a weak reference. Only used by
-    /// [`stream::IqStream`].
+    /// [`stream::IqStream`]. librtlsdr documents `rtlsdr_cancel_async` as
+    /// safe to call from a thread other than the one running `read_async`,
+    /// which is what makes this hand-off sound.
     pub(crate) fn as_ptr(&self) -> *mut ffi::RtlSdrDev {
         self.ptr
     }
 
-    /// Clone a [`TunerHandle`] that can be used to retune or change gain
-    /// from threads other than the reader thread. See [`TunerHandle`] for
-    /// the thread-safety assumptions.
-    pub fn tuner_handle(&self) -> TunerHandle {
-        TunerHandle { ptr: self.ptr }
-    }
-}
-
-/// Thread-safe control surface for tuning/gain changes during streaming.
-///
-/// Does **not** own the device — the reader thread does. The owner
-/// guarantees the device stays open for at least as long as any
-/// [`TunerHandle`] that calls into it (see the lifecycle management in
-/// `commands::Session`).
-///
-/// librtlsdr's `rtlsdr_set_center_freq`, `rtlsdr_set_tuner_gain_mode`,
-/// and `rtlsdr_set_tuner_gain` are documented as callable while a
-/// `read_async` loop is running on another thread; this is the standard
-/// pattern used by `rtl_fm` and every SDR UI on top of librtlsdr.
-#[derive(Clone, Copy)]
-pub struct TunerHandle {
-    ptr: *mut ffi::RtlSdrDev,
-}
-
-// SAFETY: only `set_center_freq`, `set_tuner_gain_mode`, `set_tuner_gain`
-// are reachable through this type — all documented as thread-safe vs the
-// reader thread.
-unsafe impl Send for TunerHandle {}
-unsafe impl Sync for TunerHandle {}
-
-impl TunerHandle {
-    pub fn set_center_freq(&self, hz: u32) -> Result<(), RailError> {
-        // SAFETY: see type-level doc — caller guarantees the underlying
-        // device is still open.
-        let rc = unsafe { ffi::rtlsdr_set_center_freq(self.ptr, hz) };
-        if rc != 0 {
-            return Err(RailError::StreamError(format!(
-                "rtlsdr_set_center_freq({hz}) -> {rc}"
-            )));
-        }
-        Ok(())
-    }
-
-    pub fn set_tuner_gain_mode(&self, manual: bool) -> Result<(), RailError> {
-        let flag: c_int = if manual { 1 } else { 0 };
-        // SAFETY: as above.
-        let rc = unsafe { ffi::rtlsdr_set_tuner_gain_mode(self.ptr, flag) };
-        if rc != 0 {
-            return Err(RailError::StreamError(format!(
-                "rtlsdr_set_tuner_gain_mode({manual}) -> {rc}"
-            )));
-        }
-        Ok(())
-    }
-
-    pub fn set_tuner_gain_tenths(&self, tenths_db: i32) -> Result<(), RailError> {
-        // SAFETY: as above.
-        let rc = unsafe { ffi::rtlsdr_set_tuner_gain(self.ptr, tenths_db) };
-        if rc != 0 {
-            return Err(RailError::StreamError(format!(
-                "rtlsdr_set_tuner_gain({tenths_db}) -> {rc}"
-            )));
-        }
-        Ok(())
-    }
-
-    /// Read back the currently tuned center frequency. librtlsdr snaps the
-    /// requested Hz to the tuner's resolution; the UI uses this value to
-    /// reflect what actually happened after [`Self::set_center_freq`].
-    pub fn center_freq(&self) -> u32 {
-        // SAFETY: see type-level doc.
-        unsafe { ffi::rtlsdr_get_center_freq(self.ptr) }
-    }
-
-    /// PPM crystal correction while streaming. See `docs/HARDWARE.md` §3.
-    ///
-    /// librtlsdr returns `-2` when the requested value matches the current
-    /// one — treated as success.
-    pub fn set_freq_correction_ppm(&self, ppm: i32) -> Result<(), RailError> {
-        // SAFETY: see type-level doc.
-        let rc = unsafe { ffi::rtlsdr_set_freq_correction(self.ptr, ppm) };
-        if rc != 0 && rc != -2 {
-            return Err(RailError::StreamError(format!(
-                "rtlsdr_set_freq_correction({ppm}) -> {rc}"
-            )));
-        }
-        Ok(())
+    /// A [`Tuner`] port handle usable from threads other than the reader
+    /// thread. See [`RtlSdrTuner`] for the lifetime and thread-safety
+    /// assumptions the caller must uphold.
+    pub fn tuner(&self) -> RtlSdrTuner {
+        RtlSdrTuner::from_ptr(self.ptr)
     }
 }
 

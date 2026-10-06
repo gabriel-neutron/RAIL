@@ -1,15 +1,8 @@
-:root {
-  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-size: 14px;
-  color: #d7dde3;
-  background-color: #0b0d10;
-
-  /* Scientific-instrument palette shared by axis + filter marker. */
-  --accent-tuned: #7ee7ff;
-  --axis-label: #9aa7b5;
-  --axis-tick-major: #6b7785;
-  --axis-tick-minor: #2a3442;
-}
+/* Layout and structure. Every colour, font and size decision lives in
+ * theme.css, which is imported after this file and therefore wins. Do not
+ * reintroduce a palette here: two sources of truth is how the old one went
+ * stale without anyone noticing.
+ */
 
 * {
   box-sizing: border-box;
@@ -21,7 +14,6 @@ html,
   margin: 0;
   padding: 0;
   height: 100%;
-  background-color: #0b0d10;
 }
 
 .app {
@@ -29,7 +21,7 @@ html,
   flex-direction: column;
   height: 100vh;
   padding: 12px 16px;
-  gap: 10px;
+  gap: 12px;
   /* Prevent the waterfall canvas's drag transform from spilling
    * into the window and introducing body-level scrollbars. */
   overflow: hidden;
@@ -37,41 +29,23 @@ html,
 
 .app-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 150px;
+  grid-template-columns: minmax(0, 1fr) 96px;
   gap: 12px;
   flex: 1;
   min-height: 0;
 }
 
-.app-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  border-bottom: 1px solid #1a1f26;
-  padding-bottom: 6px;
-}
-
-.app-header h1 {
-  font-size: 18px;
-  letter-spacing: 0.12em;
-  margin: 0;
-  color: #f2f4f8;
-}
-
-.app-status {
+/* One bar: wordmark, menus, link status. */
+.topbar {
   display: flex;
   align-items: center;
-  gap: 16px;
-  color: #8793a0;
-  font-size: 12px;
+  gap: 20px;
+  min-width: 0;
 }
 
-.app-status code {
-  color: #d7dde3;
-  background-color: #141a22;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 11px;
+.topbar .menu-bar {
+  flex: 1;
+  min-width: 0;
 }
 
 /* -------- StatusPill -------- */
@@ -82,10 +56,6 @@ html,
   gap: 8px;
   padding: 3px 10px;
   border-radius: 999px;
-  background-color: #141a22;
-  border: 1px solid #1a1f26;
-  font-size: 12px;
-  color: #d7dde3;
 }
 
 .status-pill-dot {
@@ -95,47 +65,19 @@ html,
   flex-shrink: 0;
 }
 
-.status-pill-green .status-pill-dot {
-  background-color: #5dd38f;
-  box-shadow: 0 0 8px rgba(93, 211, 143, 0.6);
-}
-
-.status-pill-amber .status-pill-dot {
-  background-color: #d8b65a;
-  box-shadow: 0 0 8px rgba(216, 182, 90, 0.5);
-}
-
-.status-pill-red .status-pill-dot {
-  background-color: #ff5470;
-  box-shadow: 0 0 8px rgba(255, 84, 112, 0.6);
-}
-
 .status-pill-label {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11px;
-  color: #e7ebf1;
-  letter-spacing: 0.02em;
+  min-width: 0;
+  max-width: 48ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .status-pill-refresh {
   margin-left: 4px;
   padding: 2px 8px;
-  font-size: 11px;
-  color: #d7dde3;
-  background-color: #1a2230;
-  border: 1px solid #2a3442;
   border-radius: 4px;
   cursor: pointer;
-  font-family: inherit;
-}
-
-.status-pill-refresh:hover {
-  background-color: #243046;
-  border-color: #3a4a5e;
-}
-
-.status-pill-refresh:active {
-  background-color: #141a22;
 }
 
 /* -------- Control panel -------- */
@@ -145,16 +87,40 @@ html,
   flex-direction: column;
   gap: 8px;
   padding: 10px 12px;
-  border: 1px solid #1a1f26;
   border-radius: 6px;
-  background-color: #10151b;
 }
 
+.control-panel {
+  container-type: inline-size;
+}
+
+/* Mode, bandwidth and tools always share one line. When the panel gets
+ * tight the row sheds its text labels rather than wrapping. */
 .control-panel-row {
   display: flex;
   align-items: center;
   gap: 16px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+
+.control-panel-row > * {
+  flex-shrink: 0;
+}
+
+@container (max-width: 820px) {
+  .mode-selector-label,
+  .filter-control-label,
+  .hover-slider-value {
+    display: none;
+  }
+}
+
+/* Audio and PPM are set-and-forget: pinned to the row's far edge. */
+.control-panel-tools {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-left: auto;
 }
 
 /* -------- FrequencyControl -------- */
@@ -166,10 +132,8 @@ html,
 }
 
 .frequency-control-label {
-  color: #8793a0;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: 10px;
 }
 
 .frequency-control-row {
@@ -183,11 +147,6 @@ html,
   flex: 1;
   min-width: 0;
   box-sizing: border-box;
-  background-color: #141a22;
-  border: 1px solid #1a1f26;
-  color: #e7ebf1;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 22px;
   letter-spacing: 0.02em;
   padding: 4px 10px;
   border-radius: 4px;
@@ -195,7 +154,6 @@ html,
 
 .frequency-control-frequency:focus {
   outline: none;
-  border-color: #3aa0ff;
 }
 
 .frequency-control-frequency:disabled {
@@ -206,51 +164,26 @@ html,
 .frequency-control-units {
   display: inline-flex;
   gap: 2px;
-  border: 1px solid #1a1f26;
   border-radius: 4px;
   overflow: hidden;
 }
 
 .unit-btn {
   background: transparent;
-  color: #8793a0;
   border: none;
   padding: 3px 10px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11px;
   cursor: pointer;
-}
-
-.unit-btn:hover {
-  color: #d7dde3;
-}
-
-.unit-btn-active {
-  background-color: #1a2a3a;
-  color: #3aa0ff;
 }
 
 .frequency-control-steps {
   display: flex;
-  gap: 4px;
 }
 
 .step-btn {
   flex: 1;
-  background-color: #141a22;
-  color: #d7dde3;
-  border: 1px solid #1a1f26;
   border-radius: 4px;
   padding: 4px 6px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11px;
   cursor: pointer;
-}
-
-.step-btn:hover {
-  background-color: #1a2a3a;
-  border-color: #3aa0ff;
-  color: #3aa0ff;
 }
 
 /* -------- PpmControl -------- */
@@ -262,18 +195,11 @@ html,
 }
 
 .ppm-control-label {
-  color: #8793a0;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: 10px;
 }
 
 .ppm-control-input {
-  background-color: #141a22;
-  border: 1px solid #1a1f26;
-  color: #e7ebf1;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 12px;
   padding: 3px 6px;
   border-radius: 4px;
   width: 56px;
@@ -282,16 +208,6 @@ html,
 
 .ppm-control-input:focus {
   outline: none;
-  border-color: #3aa0ff;
-}
-
-.ppm-control-input:disabled {
-  color: #4a525c;
-}
-
-.ppm-control-error {
-  color: #ff5470;
-  font-size: 11px;
 }
 
 /* -------- MenuBar -------- */
@@ -300,38 +216,20 @@ html,
   display: flex;
   align-items: stretch;
   gap: 2px;
-  background-color: #10151b;
-  border: 1px solid #1a1f26;
-  border-radius: 4px;
-  padding: 2px;
   position: relative;
   z-index: 10;
 }
 
 .menu-top {
   background: transparent;
-  color: #d7dde3;
   border: none;
   padding: 4px 12px;
-  font-family: inherit;
-  font-size: 12px;
   cursor: pointer;
   border-radius: 3px;
 }
 
-.menu-top:hover:not(:disabled) {
-  background-color: #1a2a3a;
-  color: #3aa0ff;
-}
-
 .menu-top:disabled {
-  color: #4a525c;
   cursor: default;
-}
-
-.menu-top-open {
-  background-color: #1a2a3a;
-  color: #3aa0ff;
 }
 
 .menu-group {
@@ -343,13 +241,10 @@ html,
   top: calc(100% + 4px);
   right: 0;
   min-width: 240px;
-  background-color: #10151b;
-  border: 1px solid #1a1f26;
   border-radius: 4px;
   padding: 4px;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   z-index: 20;
 }
 
@@ -363,23 +258,14 @@ html,
 
 .menu-item {
   background: transparent;
-  color: #d7dde3;
   border: none;
   text-align: left;
   padding: 6px 10px;
-  font-family: inherit;
-  font-size: 12px;
   cursor: pointer;
   border-radius: 3px;
 }
 
-.menu-item:hover:not(:disabled) {
-  background-color: #1a2a3a;
-  color: #3aa0ff;
-}
-
 .menu-item:disabled {
-  color: #4a525c;
   cursor: not-allowed;
 }
 
@@ -387,22 +273,17 @@ html,
 
 .menu-separator {
   height: 1px;
-  background-color: #1a1f26;
   margin: 4px 0;
 }
 
 .menu-section-label {
   padding: 4px 10px 2px;
-  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  color: #8793a0;
 }
 
 .menu-empty {
   padding: 4px 10px 6px;
-  color: #8793a0;
-  font-size: 11px;
   font-style: italic;
 }
 
@@ -424,10 +305,6 @@ html,
   overflow: hidden;
 }
 
-.menu-bookmark:hover {
-  background-color: #141a22;
-}
-
 .menu-bookmark-tune {
   flex: 1;
   display: flex;
@@ -435,55 +312,27 @@ html,
   justify-content: space-between;
   gap: 12px;
   background: transparent;
-  color: #d7dde3;
   border: none;
   padding: 4px 10px;
   cursor: pointer;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 12px;
   text-align: left;
-}
-
-.menu-bookmark-tune:hover {
-  color: #3aa0ff;
-}
-
-.menu-bookmark-name {
-  font-weight: 500;
-}
-
-.menu-bookmark-freq {
-  color: #8793a0;
-  font-size: 11px;
 }
 
 .menu-bookmark-delete {
   background: transparent;
-  color: #4a525c;
   border: none;
   padding: 0 10px;
   cursor: pointer;
-  font-size: 14px;
   line-height: 1;
-}
-
-.menu-bookmark-delete:hover {
-  background-color: #2a1414;
-  color: #ff5470;
 }
 
 .menu-error {
   padding: 4px 10px;
-  color: #ff5470;
-  font-size: 11px;
 }
 
 .menu-item-freq {
   margin-left: auto;
   padding-left: 12px;
-  color: #8793a0;
-  font-size: 10px;
-  font-family: monospace;
 }
 
 .menu-item-check {
@@ -494,7 +343,6 @@ html,
 }
 
 .menu-item-check input[type="checkbox"] {
-  accent-color: #3aa0ff;
   cursor: pointer;
 }
 
@@ -507,75 +355,39 @@ html,
 }
 
 .mode-selector-label {
-  color: #8793a0;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: 10px;
 }
 
 .mode-selector-buttons {
   display: inline-flex;
   gap: 2px;
   padding: 2px;
-  border: 1px solid #1a1f26;
   border-radius: 6px;
-  background-color: #0d1217;
 }
 
 .mode-btn {
   background: transparent;
-  color: #8793a0;
   border: none;
   padding: 3px 12px;
   border-radius: 4px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11px;
   cursor: pointer;
   transition: color 150ms ease-out, background-color 150ms ease-out,
     transform 100ms ease-out;
-}
-
-.mode-btn:hover:not(:disabled) {
-  color: #d7dde3;
-  background-color: rgba(255, 255, 255, 0.04);
 }
 
 .mode-btn:active:not(:disabled) {
   transform: scale(0.95);
 }
 
-.mode-btn-active,
-.mode-btn-active:hover {
-  background-color: #1a2a3a;
-  color: #3aa0ff;
-}
-
 .mode-btn-disabled,
 .mode-btn:disabled {
-  color: #3a424c;
   cursor: not-allowed;
 }
 
-/* Spectral analysis confirmed this mode (green) */
-.mode-btn-confirmed,
-.mode-btn-confirmed:hover {
-  color: #4caf84;
-}
-
-/* Frequency prior suggests this mode (amber) — can overlap with confirmed */
-.mode-btn-suggested,
-.mode-btn-suggested:hover {
-  color: #c8973a;
-}
-
 .mode-suggested-badge {
-  font-size: 11px;
-  font-family: monospace;
   padding: 1px 6px;
   border-radius: 3px;
-  background: #1a2a1a;
-  color: #4caf84;
-  border: 1px solid #2a4a2a;
   white-space: nowrap;
   cursor: default;
 }
@@ -589,51 +401,32 @@ html,
 }
 
 .filter-control-label {
-  color: #8793a0;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: 10px;
 }
 
 .filter-control-buttons {
   display: inline-flex;
   gap: 2px;
   padding: 2px;
-  border: 1px solid #1a1f26;
   border-radius: 6px;
-  background-color: #0d1217;
 }
 
 .filter-btn {
   background: transparent;
-  color: #8793a0;
   border: none;
   padding: 3px 10px;
   border-radius: 4px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11px;
   cursor: pointer;
   transition: color 150ms ease-out, background-color 150ms ease-out,
     transform 100ms ease-out;
-}
-
-.filter-btn:hover:not(:disabled) {
-  color: #d7dde3;
-  background-color: rgba(255, 255, 255, 0.04);
 }
 
 .filter-btn:active:not(:disabled) {
   transform: scale(0.95);
 }
 
-.filter-btn-active,
-.filter-btn-active:hover {
-  background-color: #1a2a3a;
-  color: #3aa0ff;
-}
-
 .filter-btn:disabled {
-  color: #3a424c;
   cursor: not-allowed;
 }
 
@@ -662,15 +455,9 @@ html,
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: #9aa3ad;
   cursor: pointer;
   transition: color 150ms ease-out, background-color 150ms ease-out,
     transform 100ms ease-out;
-}
-
-.hover-slider-btn:hover {
-  color: #e7ebf1;
-  background-color: rgba(255, 255, 255, 0.05);
 }
 
 .hover-slider-btn:active {
@@ -696,17 +483,12 @@ html,
   outline: none;
 }
 
-.hover-slider-track:focus-visible .hover-slider-thumb {
-  box-shadow: 0 0 0 2px #3aa0ff;
-}
-
 .hover-slider-track-bg {
   position: absolute;
   inset: 0 0 0 0;
   margin: auto 0;
   height: 3px;
   border-radius: 999px;
-  background-color: rgba(255, 255, 255, 0.08);
 }
 
 .hover-slider-track-fill {
@@ -717,12 +499,7 @@ html,
   margin: auto 0;
   height: 3px;
   border-radius: 999px;
-  background-color: rgba(231, 235, 241, 0.55);
   transition: background-color 120ms ease-out;
-}
-
-.hover-slider-track:hover .hover-slider-track-fill {
-  background-color: #e7ebf1;
 }
 
 .hover-slider-thumb {
@@ -730,8 +507,6 @@ html,
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background-color: #e7ebf1;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   transition: transform 120ms ease-out;
 }
 
@@ -740,10 +515,7 @@ html,
 }
 
 .hover-slider-value {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 10px;
   font-variant-numeric: tabular-nums;
-  color: #8793a0;
   padding-left: 2px;
   white-space: nowrap;
   transition: opacity 150ms ease-out;
@@ -769,24 +541,6 @@ html,
   justify-content: space-between;
 }
 
-.waterfall-status {
-  font-size: 11px;
-  color: #8793a0;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-}
-
-.waterfall-error {
-  color: #ff5470;
-}
-
-.waterfall-ok {
-  color: #78c76e;
-}
-
-.waterfall-pending {
-  color: #d8b65a;
-}
-
 /* -------- Waterfall floor/ceiling range controls -------- */
 
 .wf-range-controls {
@@ -797,21 +551,14 @@ html,
 }
 
 .wf-range-label {
-  font-size: 10px;
-  color: #6b7785;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
   white-space: nowrap;
 }
 
 .wf-range-sep {
-  color: #2a3442;
   margin: 0 2px;
 }
 
 .wf-range-value {
-  font-size: 10px;
-  color: #9aa7b5;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
   min-width: 3.8ch;
   text-align: right;
 }
@@ -822,7 +569,6 @@ html,
   width: 80px;
   height: 3px;
   border-radius: 2px;
-  background: #1e2730;
   outline: none;
   cursor: pointer;
 }
@@ -833,7 +579,6 @@ html,
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #3aa0ff;
   cursor: pointer;
 }
 
@@ -841,15 +586,11 @@ html,
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #3aa0ff;
   cursor: pointer;
   border: none;
 }
 
 .spectrum-wrap {
-  background-color: #07090c;
-  border: 1px solid #1a1f26;
-  border-bottom: none;
   padding: 0;
   display: block;
 }
@@ -865,8 +606,6 @@ html,
   width: 100%;
   height: 24px;
   display: block;
-  background-color: #07090c;
-  border-top: 1px solid #1a1f26;
 }
 
 .band-guide-controls {
@@ -874,8 +613,6 @@ html,
   align-items: center;
   gap: 3px;
   padding: 1px 5px;
-  background-color: #07090c;
-  border-top: 1px solid #1a1f26;
   min-height: 18px;
   flex-shrink: 0;
 }
@@ -883,85 +620,45 @@ html,
 .band-guide-sep {
   width: 1px;
   height: 10px;
-  background-color: #2a3442;
   margin: 0 2px;
   flex-shrink: 0;
 }
 
 .band-guide-toggle {
-  font-size: 10px;
   line-height: 1;
   padding: 1px 3px;
   background: none;
-  border: 1px solid transparent;
   border-radius: 3px;
-  color: #6b7785;
   cursor: pointer;
-  font-family: inherit;
   flex-shrink: 0;
 }
 
-.band-guide-toggle:hover {
-  color: #9aa7b5;
-  border-color: #2a3442;
-}
-
-.band-guide-toggle.is-active {
-  color: #7ee7ff;
-}
-
 .band-guide-pill {
-  font-size: 9px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
   line-height: 1;
   padding: 1px 4px;
   background: none;
-  border: 1px solid #2a3442;
   border-radius: 3px;
-  color: #6b7785;
   cursor: pointer;
   flex-shrink: 0;
   transition: color 80ms, border-color 80ms;
 }
 
-.band-guide-pill:hover {
-  color: #9aa7b5;
-  border-color: #4a5565;
-}
-
-.band-guide-pill.is-active {
-  border-color: currentColor;
-}
-
-.band-guide-pill--broadcast.is-active { color: #3a8ef0; }
-.band-guide-pill--aviation.is-active  { color: #e8a020; }
-.band-guide-pill--maritime.is-active  { color: #20b8c8; }
-.band-guide-pill--amateur.is-active   { color: #7e50e8; }
-.band-guide-pill--utility.is-active   { color: #60a860; }
-.band-guide-pill--weather.is-active   { color: #d06060; }
-.band-guide-pill--ism.is-active       { color: #909090; }
-
 .band-guide-axis {
   width: 100%;
   height: 16px;
   display: block;
-  background-color: #07090c;
 }
 
 .filter-band-marker {
   width: 100%;
   height: 26px;
   display: block;
-  background-color: #07090c;
-  border-top: 1px solid #1a1f26;
 }
 
 .waterfall-canvas {
   width: 100%;
   flex: 1;
   min-height: 0;
-  background-color: #07090c;
-  border: 1px solid #1a1f26;
   image-rendering: pixelated;
   display: block;
   cursor: grab;
@@ -979,17 +676,13 @@ html,
   flex-direction: column;
   gap: 6px;
   padding: 12px;
-  border: 1px solid #1a1f26;
   border-radius: 6px;
-  background-color: #10151b;
   min-height: 0;
 }
 
 .signal-meter-header {
-  color: #8793a0;
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  font-size: 10px;
   text-align: center;
 }
 
@@ -1005,9 +698,6 @@ html,
 .signal-meter-ticks {
   position: relative;
   width: 30px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 9px;
-  color: #4a525c;
 }
 
 .signal-meter-tick {
@@ -1020,9 +710,6 @@ html,
 .signal-meter-bar {
   position: relative;
   flex: 1;
-  background-color: #0d1217;
-  border: 1px solid #1a1f26;
-  border-radius: 4px;
   overflow: hidden;
   min-height: 120px;
 }
@@ -1032,13 +719,6 @@ html,
   left: 0;
   right: 0;
   bottom: 0;
-  background: linear-gradient(
-    to top,
-    #2a6a3a 0%,
-    #5dd38f 55%,
-    #d8b65a 80%,
-    #ff5470 100%
-  );
   transition: height 80ms linear;
 }
 
@@ -1047,8 +727,6 @@ html,
   left: 0;
   right: 0;
   height: 2px;
-  background-color: #e7ebf1;
-  box-shadow: 0 0 4px rgba(231, 235, 241, 0.7);
   transition: bottom 80ms linear;
 }
 
@@ -1057,18 +735,13 @@ html,
   flex-direction: column;
   gap: 2px;
   align-items: center;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
 }
 
 .signal-meter-current {
-  color: #e7ebf1;
-  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
 .signal-meter-peak-text {
-  color: #8793a0;
-  font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1080,20 +753,7 @@ html,
   height: 7px;
   margin-left: 6px;
   border-radius: 50%;
-  background-color: #ff5470;
-  box-shadow: 0 0 6px rgba(255, 84, 112, 0.7);
-  animation: menu-rec-blink 1.2s ease-in-out infinite;
   vertical-align: middle;
-}
-
-@keyframes menu-rec-blink {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.35;
-  }
 }
 
 /* -------- Transport bar (IQ replay) -------- */
@@ -1101,27 +761,15 @@ html,
 .transport-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   padding: 8px 12px;
-  margin-top: 8px;
-  background-color: #0f141a;
-  border: 1px solid #1d2630;
-  border-radius: 6px;
 }
 
 .transport-btn {
   padding: 4px 12px;
-  font-size: 12px;
-  color: #d7dde3;
-  background-color: #162029;
-  border: 1px solid #25313d;
   border-radius: 4px;
   cursor: pointer;
   transition: background-color 120ms ease;
-}
-
-.transport-btn:hover {
-  background-color: #1c2835;
 }
 
 .transport-btn.transport-close {
@@ -1131,22 +779,15 @@ html,
 .transport-slider {
   flex: 1;
   min-width: 0;
-  accent-color: #3aa0ff;
 }
 
 .transport-time {
-  font-family: "JetBrains Mono", "Consolas", ui-monospace, monospace;
-  font-size: 12px;
   font-variant-numeric: tabular-nums;
-  color: #9cbbd8;
   min-width: 84px;
   text-align: center;
 }
 
 .transport-meta {
-  font-family: "JetBrains Mono", "Consolas", ui-monospace, monospace;
-  font-size: 12px;
-  color: #7b8b9c;
   white-space: nowrap;
 }
 
@@ -1154,55 +795,38 @@ html,
 
 .controls-row {
   display: flex;
-  align-items: stretch;
-  gap: 10px;
-}
-
-.controls-row > .control-panel {
-  flex: 1;
-  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
 }
 
 /* -------- Scanner panel -------- */
 
+/* A single slim strip under the tuner: header, fields, activity map,
+ * start/nav/status. Wraps to a second line only in a narrow window. */
 .scanner-panel {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid #1a1f26;
-  border-radius: 6px;
-  background-color: #10151b;
-  width: 254px;
-  flex-shrink: 0;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
 }
 
 .scanner-header {
-  color: #8793a0;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: 10px;
 }
 
 .scanner-fields {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 5px 8px;
 }
 
 .scanner-label {
-  color: #8793a0;
-  font-size: 11px;
   white-space: nowrap;
 }
 
 .scanner-input {
-  background-color: #141a22;
-  border: 1px solid #1a1f26;
-  color: #e7ebf1;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 12px;
   padding: 3px 6px;
   border-radius: 4px;
   text-align: right;
@@ -1221,61 +845,34 @@ html,
 
 .scanner-input:focus {
   outline: none;
-  border-color: #3aa0ff;
-}
-
-.scanner-input:disabled {
-  color: #4a525c;
 }
 
 .scanner-unit {
-  color: #8793a0;
-  font-size: 10px;
   white-space: nowrap;
-}
-
-.scanner-separator {
-  height: 1px;
-  background-color: #1a1f26;
 }
 
 .scanner-footer {
   display: flex;
   align-items: center;
   gap: 10px;
+  margin-left: auto;
+}
+
+.band-activity-canvas {
+  flex: 1 1 120px;
+  min-width: 120px;
+  height: 28px;
+  display: block;
+  cursor: crosshair;
+  image-rendering: pixelated;
 }
 
 .scanner-btn {
   padding: 4px 14px;
   border-radius: 4px;
-  border: 1px solid;
-  font-family: inherit;
-  font-size: 12px;
   cursor: pointer;
   transition: background-color 120ms ease-out, border-color 120ms ease-out;
   flex-shrink: 0;
-}
-
-.scanner-btn-start {
-  background-color: #101e13;
-  border-color: #1f4028;
-  color: #5dd38f;
-}
-
-.scanner-btn-start:hover:not(:disabled) {
-  background-color: #162b1b;
-  border-color: #2d5c3a;
-}
-
-.scanner-btn-stop {
-  background-color: #1e0e11;
-  border-color: #3d1a20;
-  color: #ff5470;
-}
-
-.scanner-btn-stop:hover {
-  background-color: #2a1217;
-  border-color: #5a2230;
 }
 
 .scanner-btn:disabled {
@@ -1284,9 +881,7 @@ html,
 }
 
 .scanner-status {
-  font-size: 11px;
-  color: #8793a0;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  min-width: 7ch;
   font-style: italic;
   flex: 1;
   white-space: nowrap;
@@ -1303,9 +898,6 @@ html,
 
 .scanner-nav-btn {
   background: none;
-  border: 1px solid #1e2a38;
-  color: #6b97c7;
-  font-size: 16px;
   line-height: 1;
   width: 22px;
   height: 22px;
@@ -1318,29 +910,12 @@ html,
   transition: border-color 100ms, color 100ms;
 }
 
-.scanner-nav-btn:hover:not(:disabled) {
-  border-color: #3aa0ff;
-  color: #a8d4ff;
-}
-
 .scanner-nav-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
 }
 
 .scanner-nav-label {
-  font-size: 11px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  color: #6b7785;
   min-width: 3.5ch;
   text-align: center;
-}
-
-.band-activity-canvas {
-  width: 100%;
-  height: 32px;
-  display: block;
-  border-radius: 3px;
-  cursor: crosshair;
-  image-rendering: pixelated;
 }

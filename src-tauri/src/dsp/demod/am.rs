@@ -22,6 +22,7 @@ impl AmEnvelope {
         Self { dc: 0.0, alpha }
     }
 
+    /// Retune the DC blocker for a new baseband rate in Hz, clearing its state.
     pub fn reconfigure(&mut self, sample_rate_hz: f32) {
         self.alpha = 1.0 - (-2.0 * std::f32::consts::PI * 20.0 / sample_rate_hz).exp();
         self.dc = 0.0;
@@ -45,6 +46,7 @@ impl AmEnvelope {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
 
     #[test]

@@ -8,21 +8,25 @@
 // Read-only view of `frequencyHz`, `sampleRateHz`, `zoom` — redraws
 // on those changes only, never per waterfall frame.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
+import { useResizeTick } from "../../hooks/useResizeTick";
 import { useRadioStore } from "../../store/radio";
+import { prepareCanvas2d } from "../../viewport/canvasSizing";
+import { formatHz } from "../../viewport/formatHz";
+import { createSpectrumViewport } from "../../viewport/spectrumViewport";
 
 const HEIGHT_PX = 24;
 const TARGET_TICKS = 12;
 const MINOR_SUBDIVISIONS = 5;
 
-const LABEL_COLOR = "#9aa7b5";
-const LABEL_CENTER_COLOR = "#e7ebf1";
-const TICK_MAJOR_COLOR = "#6b7785";
-const TICK_MINOR_COLOR = "#2a3442";
-const BASELINE_COLOR = "#1a2230";
-const BASELINE_GLOW = "rgba(126, 231, 255, 0.12)";
-const ACCENT_TUNED = "#7ee7ff";
+const LABEL_COLOR = "#a36d18";
+const LABEL_CENTER_COLOR = "#fff4dd";
+const TICK_MAJOR_COLOR = "#785011";
+const TICK_MINOR_COLOR = "#3a2809";
+const BASELINE_COLOR = "#2a1c06";
+const BASELINE_GLOW = "rgba(255, 178, 41, 0.06)";
+const ACCENT_TUNED = "#ffb229";
 
 /// Snap `raw` to the nearest {1, 2, 5} × 10^n step so tick labels
 /// land on round numbers.
@@ -39,68 +43,34 @@ const niceStep = (raw: number): number => {
   return nice * pow10;
 };
 
-/// Format `hz` for a tick label chosen for the current `step` size.
-/// Uses MHz when step >= 1 MHz, kHz when >= 1 kHz, otherwise Hz. The
-/// fractional-digit count is just enough to resolve adjacent ticks.
-const formatTick = (hz: number, step: number): string => {
-  if (step >= 1_000_000) {
-    const digits = Math.max(0, Math.min(6, -Math.floor(Math.log10(step)) + 6));
-    return `${(hz / 1_000_000).toFixed(digits)} MHz`;
-  }
-  if (step >= 1_000) {
-    const digits = Math.max(0, Math.min(6, -Math.floor(Math.log10(step)) + 3));
-    return `${(hz / 1_000).toFixed(digits)} kHz`;
-  }
-  const digits = Math.max(0, -Math.floor(Math.log10(step)));
-  return `${hz.toFixed(digits)} Hz`;
-};
-
 export const FrequencyAxis = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const frequencyHz = useRadioStore((s) => s.frequencyHz);
   const sampleRateHz = useRadioStore((s) => s.sampleRateHz);
   const zoom = useRadioStore((s) => s.zoom);
-  // Bumped by a ResizeObserver so the draw effect re-runs whenever
-  // the canvas's layout size changes (window resize, panel resize,
-  // initial mount before layout). Without this the HiDPI-scaled
-  // backing buffer stays sized for whatever width was current at
-  // first paint, which makes labels look blurry afterward.
-  const [resizeTick, setResizeTick] = useState(0);
+  const fftSize = useRadioStore((s) => s.fftSize);
+  const resizeTick = useResizeTick(canvasRef);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ro = new ResizeObserver(() => setResizeTick((t) => t + 1));
-    ro.observe(canvas);
-    return () => ro.disconnect();
-  }, []);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const dpr = window.devicePixelRatio || 1;
-    const cssWidth = canvas.clientWidth;
-    if (cssWidth <= 0) return;
+    const sized = prepareCanvas2d(canvas, HEIGHT_PX, window.devicePixelRatio || 1);
+    if (!sized) return;
+    const { ctx, cssWidthPx: cssWidth } = sized;
     const cssHeight = HEIGHT_PX;
-    // Round to integer device pixels — fractional canvas dimensions
-    // produce subpixel sampling that softens thin lines and text.
-    const targetW = Math.max(1, Math.round(cssWidth * dpr));
-    const targetH = Math.max(1, Math.round(cssHeight * dpr));
-    if (canvas.width !== targetW) canvas.width = targetW;
-    if (canvas.height !== targetH) canvas.height = targetH;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
 
-    const spanHz = sampleRateHz / zoom;
-    if (!Number.isFinite(spanHz) || spanHz <= 0) return;
-    const minHz = frequencyHz - spanHz / 2;
-    const maxHz = frequencyHz + spanHz / 2;
-    const step = niceStep(spanHz / TARGET_TICKS);
+    const view = createSpectrumViewport({
+      centerHz: frequencyHz,
+      sampleRateHz,
+      zoom,
+      fftSize,
+      cssWidthPx: cssWidth,
+    });
+    if (view === null) return;
+    const { minHz, maxHz, hzToX } = view;
+    const step = niceStep(view.spanHz / TARGET_TICKS);
     const minorStep = step / MINOR_SUBDIVISIONS;
-
-    const hzToX = (hz: number): number => ((hz - minHz) / spanHz) * cssWidth;
 
     // Etched rule: thin dark baseline + a soft phosphor glow two
     // pixels below it. Reads like an engraved lab-instrument scale.
@@ -146,13 +116,13 @@ export const FrequencyAxis = () => {
     // don't collide. Measured label width + 10 px padding is the
     // minimum spacing required; stride = ceil(needed / available).
     ctx.font = "10px 'JetBrains Mono', ui-monospace, monospace";
-    const labels = majorHzList.map((hz) => formatTick(hz, step));
+    const labels = majorHzList.map((hz) => formatHz(hz, { stepHz: step }));
     let maxLabelWidth = 0;
     for (const l of labels) {
       const w = ctx.measureText(l).width;
       if (w > maxLabelWidth) maxLabelWidth = w;
     }
-    const majorSpacingPx = Math.max(1, (step / spanHz) * cssWidth);
+    const majorSpacingPx = Math.max(1, view.hzWidthToPx(step));
     const labelStride = Math.max(
       1,
       Math.ceil((maxLabelWidth + 10) / majorSpacingPx),
@@ -206,7 +176,9 @@ export const FrequencyAxis = () => {
     // DC spike from the fs/4 LO offset technique (see docs/DSP.md §1–3).
     // The hardware LO is parked at frequencyHz − sampleRateHz/4; the digital
     // fs/4 mixer shifts the signal of interest to canvas center while pushing
-    // the DC spike to frequencyHz − sampleRateHz/4 in real Hz.
+    // the DC spike to frequencyHz − sampleRateHz/4 in real Hz. That quarter
+    // is of the FULL sample rate, not of the zoomed span — it reads
+    // `sampleRateHz` directly and must not become `view.spanHz / 4`.
     const dcSpikeHz = frequencyHz - sampleRateHz / 4;
     if (dcSpikeHz >= minHz && dcSpikeHz <= maxHz) {
       const xDc = hzToX(dcSpikeHz);
@@ -235,7 +207,7 @@ export const FrequencyAxis = () => {
     ctx.moveTo(0, cssHeight - 0.5);
     ctx.lineTo(cssWidth, cssHeight - 0.5);
     ctx.stroke();
-  }, [frequencyHz, sampleRateHz, zoom, resizeTick]);
+  }, [frequencyHz, sampleRateHz, zoom, fftSize, resizeTick]);
 
   return <canvas ref={canvasRef} className="freq-axis-canvas" aria-hidden="true" />;
 };

@@ -13,6 +13,9 @@ pub mod perf_emit;
 pub mod replay;
 pub mod scanner;
 
+/// Build the Tauri application, register the IPC commands and run the event loop.
+///
+/// Exits the process with a non-zero status if the runtime fails to start.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let _ = env_logger::try_init();

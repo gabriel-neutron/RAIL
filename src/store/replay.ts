@@ -1,14 +1,12 @@
-import { open } from "@tauri-apps/plugin-dialog";
 import { create } from "zustand";
 
 import {
   openReplay,
-  pauseReplay,
-  resumeReplay,
-  seekReplay,
-  stopReplay,
+  replayTransport,
+  stopStream,
   type ReplayInfoReply,
 } from "../ipc/commands";
+import { transport } from "../ipc/transport";
 
 export type ReplayInfo = ReplayInfoReply;
 
@@ -59,11 +57,10 @@ export const useReplayStore = create<ReplayState>((set, get) => ({
 
   openFile: async () => {
     try {
-      const picked = await open({
-        multiple: false,
+      const picked = await transport().pickOpenPath({
         filters: [{ name: "SigMF data", extensions: ["sigmf-data"] }],
       });
-      if (!picked || Array.isArray(picked)) return;
+      if (!picked) return;
 
       // Load metadata up-front; the pipeline hook will call
       // `start_replay` once the live stream has been torn down.
@@ -83,7 +80,9 @@ export const useReplayStore = create<ReplayState>((set, get) => ({
   close: async () => {
     if (!get().active) return;
     try {
-      await stopReplay();
+      // Closing a file tears the session down; there is no replay-only
+      // teardown command.
+      await stopStream();
     } catch (err) {
       logError("stop replay failed", err);
     }
@@ -100,13 +99,8 @@ export const useReplayStore = create<ReplayState>((set, get) => ({
     const { active, playing } = get();
     if (!active) return;
     try {
-      if (playing) {
-        await pauseReplay();
-        set({ playing: false });
-      } else {
-        await resumeReplay();
-        set({ playing: true });
-      }
+      await replayTransport({ kind: playing ? "pause" : "play" });
+      set({ playing: !playing });
     } catch (err) {
       logError("toggle replay failed", err);
     }
@@ -115,7 +109,10 @@ export const useReplayStore = create<ReplayState>((set, get) => ({
   seek: async (positionMs) => {
     if (!get().active) return;
     try {
-      await seekReplay(Math.max(0, Math.round(positionMs)));
+      await replayTransport({
+        kind: "seek",
+        positionMs: Math.max(0, Math.round(positionMs)),
+      });
       // Optimistic local update + epoch bump so the waterfall resets
       // immediately on the user's scrub instead of waiting for the
       // next replay-position event to fan out.

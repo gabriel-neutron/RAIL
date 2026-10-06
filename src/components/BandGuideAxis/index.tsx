@@ -1,25 +1,28 @@
 // Canvas row rendering known frequency-band allocations directly on the
 // frequency axis scale. Redraws only when frequency/zoom/store state changes —
-// never per waterfall frame. See docs/DSP.md for the Hz↔pixel transform.
+// never per waterfall frame. See docs/DSP.md §9 for the Hz↔pixel transform.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
 import { BAND_ENTRIES, type BandCategory } from "../../data/bands";
+import { useResizeTick } from "../../hooks/useResizeTick";
 import { useBandGuideStore } from "../../store/bandGuide";
 import { useRadioStore } from "../../store/radio";
+import { prepareCanvas2d } from "../../viewport/canvasSizing";
+import { createSpectrumViewport } from "../../viewport/spectrumViewport";
 
 const HEIGHT_PX = 16;
 const BAR_FILL_ALPHA = "8c"; // 55 % opacity in hex
 const BAR_EDGE_ALPHA = "d9"; // 85 % opacity in hex
 
-export const CATEGORY_COLORS: Record<BandCategory, string> = {
-  broadcast: "#3a8ef0",
-  aviation:  "#e8a020",
-  maritime:  "#20b8c8",
-  amateur:   "#7e50e8",
-  utility:   "#60a860",
-  weather:   "#d06060",
-  ism:       "#909090",
+const CATEGORY_COLORS: Record<BandCategory, string> = {
+  broadcast: "#8a5a12",
+  aviation:  "#a36d18",
+  maritime:  "#7a5010",
+  amateur:   "#946114",
+  utility:   "#6e4a10",
+  weather:   "#b07418",
+  ism:       "#5e4110",
 };
 
 export const BandGuideAxis = () => {
@@ -27,42 +30,29 @@ export const BandGuideAxis = () => {
   const frequencyHz = useRadioStore((s) => s.frequencyHz);
   const sampleRateHz = useRadioStore((s) => s.sampleRateHz);
   const zoom = useRadioStore((s) => s.zoom);
+  const fftSize = useRadioStore((s) => s.fftSize);
   const visible = useBandGuideStore((s) => s.visible);
   const activeCategories = useBandGuideStore((s) => s.activeCategories);
   const region = useBandGuideStore((s) => s.region);
-  const [resizeTick, setResizeTick] = useState(0);
+  const resizeTick = useResizeTick(canvasRef);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ro = new ResizeObserver(() => setResizeTick((t) => t + 1));
-    ro.observe(canvas);
-    return () => ro.disconnect();
-  }, []);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const dpr = window.devicePixelRatio || 1;
-    const cssWidth = canvas.clientWidth;
-    if (cssWidth <= 0) return;
-
-    const targetW = Math.max(1, Math.round(cssWidth * dpr));
-    const targetH = Math.max(1, Math.round(HEIGHT_PX * dpr));
-    if (canvas.width !== targetW) canvas.width = targetW;
-    if (canvas.height !== targetH) canvas.height = targetH;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const sized = prepareCanvas2d(canvas, HEIGHT_PX, window.devicePixelRatio || 1);
+    if (!sized) return;
+    const { ctx, cssWidthPx: cssWidth } = sized;
     ctx.clearRect(0, 0, cssWidth, HEIGHT_PX);
 
-    const spanHz = sampleRateHz / zoom;
-    if (!Number.isFinite(spanHz) || spanHz <= 0) return;
-    const minHz = frequencyHz - spanHz / 2;
-    const maxHz = frequencyHz + spanHz / 2;
-
-    const hzToX = (hz: number) => ((hz - minHz) / spanHz) * cssWidth;
+    const view = createSpectrumViewport({
+      centerHz: frequencyHz,
+      sampleRateHz,
+      zoom,
+      fftSize,
+      cssWidthPx: cssWidth,
+    });
+    if (view === null) return;
+    const { minHz, maxHz, hzToX } = view;
 
     // Filter to visible, active, and region-matching bands.
     const visible_bands = BAND_ENTRIES.filter(
@@ -119,7 +109,7 @@ export const BandGuideAxis = () => {
         const collides = occupiedRanges.some(([a, b]) => lx1 > a && lx0 < b);
         if (!collides) {
           occupiedRanges.push([lx0, lx1]);
-          ctx.fillStyle = "#e7ebf1";
+          ctx.fillStyle = "#fff4dd";
           ctx.textBaseline = "middle";
           ctx.textAlign = "center";
           ctx.fillText(labelText, cx, HEIGHT_PX / 2 + 1);
@@ -128,13 +118,13 @@ export const BandGuideAxis = () => {
     }
 
     // Bottom separator line.
-    ctx.strokeStyle = "#1a2230";
+    ctx.strokeStyle = "#2a1c06";
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(0, HEIGHT_PX - 0.5);
     ctx.lineTo(cssWidth, HEIGHT_PX - 0.5);
     ctx.stroke();
-  }, [frequencyHz, sampleRateHz, zoom, visible, activeCategories, region, resizeTick]);
+  }, [frequencyHz, sampleRateHz, zoom, fftSize, visible, activeCategories, region, resizeTick]);
 
   if (!visible) return null;
 

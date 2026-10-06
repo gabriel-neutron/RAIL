@@ -1,15 +1,17 @@
-// Six-stop perceptual colormap for the waterfall, per docs/DSP.md §3.
+// Waterfall colormap. Stops, hue choice and the monotonic-luminance
+// requirement are specified in docs/DSP.md §3.
 // Returns a packed Uint8ClampedArray of length `size * 3` (RGB triplets).
 
 type Stop = [number, number, number];
 
 const STOPS: Stop[] = [
-  [8, 10, 40], // dark blue (below noise floor)
-  [25, 40, 130], // blue
-  [0, 190, 200], // cyan
-  [20, 200, 50], // green
-  [240, 220, 40], // yellow
-  [230, 40, 30], // red
+  [4, 3, 1], // cold tube (below noise floor)
+  [46, 25, 4],
+  [104, 59, 9],
+  [168, 105, 18],
+  [224, 152, 31],
+  [255, 196, 84],
+  [255, 246, 226], // bloom (peaks)
 ];
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
