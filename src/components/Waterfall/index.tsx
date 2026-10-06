@@ -180,13 +180,14 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
   // History rows keep the column they were painted at. Slide them with the
   // centre so they stay on their true frequency instead of ghosting at the
   // wrong one under the new axis. A drag does this itself (CSS shift baked in
-  // on release), so it is skipped here.
+  // on release): it records the frequency it tunes to in this ref, so the
+  // effect sees no change and cannot double-shift, however late React runs it.
   const previousFrequencyHzRef = useRef(frequencyHz);
   useEffect(() => {
     const previousHz = previousFrequencyHzRef.current;
     previousFrequencyHzRef.current = frequencyHz;
     const canvas = waterfallCanvasRef.current;
-    if (!canvas || previousHz === frequencyHz || isDraggingRef.current) return;
+    if (!canvas || previousHz === frequencyHz) return;
     const view = createSpectrumViewport({
       centerHz: frequencyHz,
       sampleRateHz,
@@ -305,7 +306,9 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
     const view = viewportForPointer(rect.width);
     if (view === null) return;
     const deltaHz = -view.pxWidthToHz(deltaPx);
-    useRadioStore.getState().setFrequency(drag.startHz + deltaHz);
+    const targetHz = Math.max(0, Math.round(drag.startHz + deltaHz));
+    previousFrequencyHzRef.current = targetHz;
+    useRadioStore.getState().setFrequency(targetHz);
     canvas.style.transform = `translateX(${deltaPx}px)`;
   };
 

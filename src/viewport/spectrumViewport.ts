@@ -16,7 +16,7 @@ const MIN_KEPT_BINS = 16;
 /// `start` is the first kept bin, `kept` how many follow it.
 ///
 /// After the fs/4 shift the tuned frequency is the CENTRE of bin `N/2`, so
-/// the window is placed around edge index `N/2 + ½`. When `N − kept` is even
+/// the window is placed around edge index `N/2 + ½`. When `N − kept` is odd
 /// that is a whole bin; otherwise the nearest whole bin leaves a residual
 /// half bin, which `createSpectrumViewport` absorbs rather than hides.
 /// See: docs/DSP.md §9.5.
