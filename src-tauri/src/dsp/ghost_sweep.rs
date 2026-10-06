@@ -181,7 +181,10 @@ fn sweep_errors_hz(fault: Fault, via_sigmf: bool) -> Vec<(i64, f64)> {
 fn apparent_equals_true_within_one_bin_at_every_centre() {
     for via_sigmf in [false, true] {
         let errors = sweep_errors_hz(Fault::None, via_sigmf);
-        assert!(errors.len() >= 15, "sweep skipped too many centres: {errors:?}");
+        assert!(
+            errors.len() >= 15,
+            "sweep skipped too many centres: {errors:?}"
+        );
         for (offset, err) in errors {
             assert!(
                 err.abs() <= ONE_BIN_HZ,
@@ -199,7 +202,10 @@ fn a_mirrored_chain_is_caught_with_the_h2_signature() {
         if offset.abs() < 3 * ONE_BIN_HZ as i64 {
             continue;
         }
-        assert!((err - 2.0 * offset as f64).abs() <= 2.0 * ONE_BIN_HZ, "{offset}: {err}");
+        assert!(
+            (err - 2.0 * offset as f64).abs() <= 2.0 * ONE_BIN_HZ,
+            "{offset}: {err}"
+        );
     }
 }
 
