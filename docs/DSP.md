@@ -403,4 +403,4 @@ z = 64, N = 8192).
 Recorded, not fixed. Correcting it moves every tick label, band-bar edge and
 filter bracket at high zoom; the alternative — snapping wheel zoom so
 `floor(N / z)` is exact — changes how zooming feels. That is a product
-decision, tracked in issue #13.
+decision, tracked in issue #17.
