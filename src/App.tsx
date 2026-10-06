@@ -1,10 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  checkDevice,
-  ping,
-  stopStream,
-  type DeviceInfo,
-} from "./ipc/commands";
+import { checkDevice, stopStream, type DeviceInfo } from "./ipc/commands";
 import { isRailError } from "./ipc/errors";
 import { subscribeIpcEvent } from "./ipc/events";
 import {
@@ -61,7 +56,6 @@ const deviceLabel = (d: DeviceState): string => {
 };
 
 function App() {
-  const [pingResult, setPingResult] = useState<string>("…");
   const [device, setDevice] = useState<DeviceState>({ status: "idle" });
   const replayActive = useReplayStore((s) => s.active);
   const scannerVisible = useScannerStore((s) => s.visible);
@@ -109,19 +103,6 @@ function App() {
     let cancelled = false;
 
     void (async () => {
-      try {
-        const reply = await ping();
-        if (!cancelled) {
-          setPingResult(reply);
-          console.info("[RAIL] ping →", reply);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          console.error("[RAIL] ping failed:", err);
-          setPingResult("error");
-        }
-      }
-
       if (!cancelled) {
         await refreshDevice();
       }
@@ -257,21 +238,16 @@ function App() {
 
   return (
     <main className="app" onPointerDown={handlePointerDown}>
-      <MenuBar />
-      <header className="app-header">
+      <header className="topbar">
         <h1>RAIL</h1>
-        <div className="app-status">
-          <span>
-            IPC <code>{pingResult}</code>
-          </span>
-          <StatusPill
-            status={device.status}
-            label={deviceLabel(device)}
-            onRefresh={() => {
-              void refreshDevice();
-            }}
-          />
-        </div>
+        <MenuBar />
+        <StatusPill
+          status={device.status}
+          label={deviceLabel(device)}
+          onRefresh={() => {
+            void refreshDevice();
+          }}
+        />
       </header>
       <div className="controls-row">
         <section className="control-panel">
@@ -279,10 +255,10 @@ function App() {
           <div className="control-panel-row">
             <ModeSelector />
             <FilterControl />
-          </div>
-          <div className="control-panel-row">
-            <AudioControls />
-            <PpmControl />
+            <div className="control-panel-tools">
+              <AudioControls />
+              <PpmControl />
+            </div>
           </div>
         </section>
         {scannerVisible && <Scanner />}

@@ -341,17 +341,15 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
       <div className="waterfall-header">
         <div className="waterfall-status">
           {error && (
-            <span className="waterfall-error">stream error: {error}</span>
+            <span className="waterfall-error">Stream error: {error}</span>
           )}
           {!error && session === null && (
-            <span className="waterfall-pending">opening stream…</span>
+            <span className="waterfall-pending">Opening stream…</span>
           )}
           {!error && session && (
             <span className="waterfall-ok">
-              fs={(session.sampleRateHz / 1e6).toFixed(3)} MHz · N=
-              {session.fftSize} · span=
-              {(displayedSpanHz / 1e6).toFixed(3)} MHz · zoom=
-              {zoom.toFixed(1)}x · DC ±{(session.sampleRateHz / 4 / 1e6).toFixed(3)} MHz
+              span {(displayedSpanHz / 1e6).toFixed(3)} MHz · zoom{" "}
+              {zoom.toFixed(1)}×
             </span>
           )}
         </div>
@@ -380,7 +378,6 @@ export const Waterfall = ({ enabled = true, onAudio }: WaterfallProps) => {
             aria-label="Waterfall ceiling dBFS"
           />
           <span className="wf-range-value">{dbCeil}</span>
-          <span className="wf-range-label wf-range-sep">|</span>
           <span className="wf-range-label">Smooth</span>
           <input
             type="range"
@@ -549,8 +546,8 @@ function drawSpectrum(
 
   // Filled area under the curve.
   const gradient = ctx.createLinearGradient(0, 0, 0, h);
-  gradient.addColorStop(0, "rgba(58, 160, 255, 0.55)");
-  gradient.addColorStop(1, "rgba(58, 160, 255, 0.04)");
+  gradient.addColorStop(0, "rgba(255, 178, 41, 0.28)");
+  gradient.addColorStop(1, "rgba(255, 178, 41, 0.02)");
   ctx.fillStyle = gradient;
   ctx.beginPath();
   ctx.moveTo(0, h);
@@ -562,7 +559,7 @@ function drawSpectrum(
   ctx.fill();
 
   // Curve on top.
-  ctx.strokeStyle = "rgba(156, 205, 255, 0.9)";
+  ctx.strokeStyle = "rgba(255, 178, 41, 0.9)";
   ctx.lineWidth = 1;
   ctx.beginPath();
   for (let i = 0; i < frame.length; i += 1) {

@@ -266,15 +266,15 @@ export const Scanner = () => {
         </div>
       </div>
 
-      <div className="scanner-separator" role="separator" />
-
-      <BandActivity
-        frequenciesHz={frequenciesHz}
-        results={results}
-        threshold={threshold}
-        selectedFrequencyHz={selectedFrequencyHz}
-        onTune={handleTune}
-      />
+      {frequenciesHz.length > 0 && (
+        <BandActivity
+          frequenciesHz={frequenciesHz}
+          results={results}
+          threshold={threshold}
+          selectedFrequencyHz={selectedFrequencyHz}
+          onTune={handleTune}
+        />
+      )}
 
       <div className="scanner-footer">
         <button

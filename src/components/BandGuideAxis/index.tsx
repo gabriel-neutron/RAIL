@@ -16,13 +16,13 @@ const BAR_FILL_ALPHA = "8c"; // 55 % opacity in hex
 const BAR_EDGE_ALPHA = "d9"; // 85 % opacity in hex
 
 const CATEGORY_COLORS: Record<BandCategory, string> = {
-  broadcast: "#3a8ef0",
-  aviation:  "#e8a020",
-  maritime:  "#20b8c8",
-  amateur:   "#7e50e8",
-  utility:   "#60a860",
-  weather:   "#d06060",
-  ism:       "#909090",
+  broadcast: "#8a5a12",
+  aviation:  "#a36d18",
+  maritime:  "#7a5010",
+  amateur:   "#946114",
+  utility:   "#6e4a10",
+  weather:   "#b07418",
+  ism:       "#5e4110",
 };
 
 export const BandGuideAxis = () => {
@@ -107,7 +107,7 @@ export const BandGuideAxis = () => {
         const collides = occupiedRanges.some(([a, b]) => lx1 > a && lx0 < b);
         if (!collides) {
           occupiedRanges.push([lx0, lx1]);
-          ctx.fillStyle = "#e7ebf1";
+          ctx.fillStyle = "#fff4dd";
           ctx.textBaseline = "middle";
           ctx.textAlign = "center";
           ctx.fillText(labelText, cx, HEIGHT_PX / 2 + 1);
@@ -116,7 +116,7 @@ export const BandGuideAxis = () => {
     }
 
     // Bottom separator line.
-    ctx.strokeStyle = "#1a2230";
+    ctx.strokeStyle = "#2a1c06";
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(0, HEIGHT_PX - 0.5);

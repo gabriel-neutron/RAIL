@@ -17,12 +17,12 @@ import { formatHz } from "../../viewport/formatHz";
 import { createSpectrumViewport } from "../../viewport/spectrumViewport";
 
 const HEIGHT_PX = 26;
-const ACCENT = "#7ee7ff";
-const BAR_COLOR = "rgba(126, 231, 255, 0.55)";
-const GLOW_TOP = "rgba(126, 231, 255, 0.10)";
-const GLOW_BOTTOM = "rgba(126, 231, 255, 0.00)";
-const CENTER_LINE_COLOR = "rgba(255, 255, 255, 0.8)";
-const LABEL_COLOR = "rgba(126, 231, 255, 0.85)";
+const ACCENT = "#ffb229";
+const BAR_COLOR = "rgba(255, 178, 41, 0.45)";
+const GLOW_TOP = "rgba(255, 178, 41, 0.08)";
+const GLOW_BOTTOM = "rgba(255, 178, 41, 0)";
+const CENTER_LINE_COLOR = "rgba(255, 244, 221, 0.8)";
+const LABEL_COLOR = "rgba(255, 178, 41, 0.85)";
 
 // Layout (top to bottom):
 //   0..9    label band (rendered only when halfBwPx is wide enough)

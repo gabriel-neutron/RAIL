@@ -20,13 +20,13 @@ const HEIGHT_PX = 24;
 const TARGET_TICKS = 12;
 const MINOR_SUBDIVISIONS = 5;
 
-const LABEL_COLOR = "#9aa7b5";
-const LABEL_CENTER_COLOR = "#e7ebf1";
-const TICK_MAJOR_COLOR = "#6b7785";
-const TICK_MINOR_COLOR = "#2a3442";
-const BASELINE_COLOR = "#1a2230";
-const BASELINE_GLOW = "rgba(126, 231, 255, 0.12)";
-const ACCENT_TUNED = "#7ee7ff";
+const LABEL_COLOR = "#a36d18";
+const LABEL_CENTER_COLOR = "#fff4dd";
+const TICK_MAJOR_COLOR = "#785011";
+const TICK_MINOR_COLOR = "#3a2809";
+const BASELINE_COLOR = "#2a1c06";
+const BASELINE_GLOW = "rgba(255, 178, 41, 0.06)";
+const ACCENT_TUNED = "#ffb229";
 
 /// Snap `raw` to the nearest {1, 2, 5} × 10^n step so tick labels
 /// land on round numbers.

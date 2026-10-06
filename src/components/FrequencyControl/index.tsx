@@ -79,7 +79,6 @@ export const FrequencyControl = () => {
       aria-disabled={replayActive || undefined}
       title={replayActive ? "Frequency is fixed by the replayed file" : undefined}
     >
-      <span className="frequency-control-label">Center</span>
       <div className="frequency-control-row">
         <input
           className="frequency-control-frequency"
